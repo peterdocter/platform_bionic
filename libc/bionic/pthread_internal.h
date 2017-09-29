@@ -31,6 +31,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
+#include "private/bionic_lock.h"
 #include "private/bionic_tls.h"
 
 /* Has the thread been detached by a pthread_join or pthread_detach call? */
@@ -39,7 +40,8 @@
 /* Has the thread been joined by another thread? */
 #define PTHREAD_ATTR_FLAG_JOINED 0x00000002
 
-struct pthread_key_data_t {
+class pthread_key_data_t {
+ public:
   uintptr_t seq; // Use uintptr_t just for alignment, as we use pointer below.
   void* data;
 };
@@ -51,9 +53,12 @@ enum ThreadJoinState {
   THREAD_DETACHED
 };
 
-struct pthread_internal_t {
-  struct pthread_internal_t* next;
-  struct pthread_internal_t* prev;
+class thread_local_dtor;
+
+class pthread_internal_t {
+ public:
+  class pthread_internal_t* next;
+  class pthread_internal_t* prev;
 
   pid_t tid;
 
@@ -89,9 +94,11 @@ struct pthread_internal_t {
 
   void* alternate_signal_stack;
 
-  pthread_mutex_t startup_handshake_mutex;
+  Lock startup_handshake_lock;
 
   size_t mmap_size;
+
+  thread_local_dtor* thread_local_dtors;
 
   void* tls[BIONIC_TLS_SLOTS];
 
@@ -103,10 +110,13 @@ struct pthread_internal_t {
    */
 #define __BIONIC_DLERROR_BUFFER_SIZE 512
   char dlerror_buffer[__BIONIC_DLERROR_BUFFER_SIZE];
+
+  bionic_tls* bionic_tls;
 };
 
 __LIBC_HIDDEN__ int __init_thread(pthread_internal_t* thread);
-__LIBC_HIDDEN__ void __init_tls(pthread_internal_t* thread);
+__LIBC_HIDDEN__ bool __init_tls(pthread_internal_t* thread);
+__LIBC_HIDDEN__ void __init_thread_stack_guard(pthread_internal_t* thread);
 __LIBC_HIDDEN__ void __init_alternate_signal_stack(pthread_internal_t*);
 
 __LIBC_HIDDEN__ pthread_t           __pthread_internal_add(pthread_internal_t* thread);
@@ -116,29 +126,44 @@ __LIBC_HIDDEN__ void                __pthread_internal_remove_and_free(pthread_i
 
 // Make __get_thread() inlined for performance reason. See http://b/19825434.
 static inline __always_inline pthread_internal_t* __get_thread() {
-  return reinterpret_cast<pthread_internal_t*>(__get_tls()[TLS_SLOT_THREAD_ID]);
+  void** tls = __get_tls();
+  if (__predict_true(tls)) {
+    return reinterpret_cast<pthread_internal_t*>(tls[TLS_SLOT_THREAD_ID]);
+  }
+
+  // This happens when called during libc initialization before TLS has been initialized.
+  return nullptr;
+}
+
+static inline __always_inline bionic_tls& __get_bionic_tls() {
+  return *__get_thread()->bionic_tls;
 }
 
 __LIBC_HIDDEN__ void pthread_key_clean_all(void);
 
-/*
- * Traditionally we gave threads a 1MiB stack. When we started
- * allocating per-thread alternate signal stacks to ease debugging of
- * stack overflows, we subtracted the same amount we were using there
- * from the default thread stack size. This should keep memory usage
- * roughly constant.
- */
-#define PTHREAD_STACK_SIZE_DEFAULT ((1 * 1024 * 1024) - SIGSTKSZ)
+// Address space is precious on LP32, so use the minimum unit: one page.
+// On LP64, we could use more but there's no obvious advantage to doing
+// so, and the various media processes use RLIMIT_AS as a way to limit
+// the amount of allocation they'll do.
+#define PTHREAD_GUARD_SIZE PAGE_SIZE
+
+// SIGSTKSZ (8KiB) is not big enough.
+// An snprintf to a stack buffer of size PATH_MAX consumes ~7KiB of stack.
+// Also, on 64-bit, logging uses more than 8KiB by itself:
+// https://code.google.com/p/android/issues/detail?id=187064
+#define SIGNAL_STACK_SIZE_WITHOUT_GUARD (16 * 1024)
+
+// Traditionally we gave threads a 1MiB stack. When we started
+// allocating per-thread alternate signal stacks to ease debugging of
+// stack overflows, we subtracted the same amount we were using there
+// from the default thread stack size. This should keep memory usage
+// roughly constant.
+#define PTHREAD_STACK_SIZE_DEFAULT ((1 * 1024 * 1024) - SIGNAL_STACK_SIZE_WITHOUT_GUARD)
 
 // Leave room for a guard page in the internally created signal stacks.
-#if defined(__LP64__)
-// SIGSTKSZ is not big enough for 64-bit arch. See http://b/23041777.
-#define SIGNAL_STACK_SIZE (16 * 1024 + PAGE_SIZE)
-#else
-#define SIGNAL_STACK_SIZE (SIGSTKSZ + PAGE_SIZE)
-#endif
+#define SIGNAL_STACK_SIZE (SIGNAL_STACK_SIZE_WITHOUT_GUARD + PTHREAD_GUARD_SIZE)
 
-/* Needed by fork. */
+// Needed by fork.
 __LIBC_HIDDEN__ extern void __bionic_atfork_run_prepare();
 __LIBC_HIDDEN__ extern void __bionic_atfork_run_child();
 __LIBC_HIDDEN__ extern void __bionic_atfork_run_parent();

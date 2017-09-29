@@ -26,13 +26,15 @@
  * SUCH DAMAGE.
  */
 
+#define __BIONIC_LP32_USE_LONG_DOUBLE
+
 #include <float.h>
 #include <stdlib.h>
 
 extern "C" int __strtorQ(const char*, char**, int, void*);
 
 long double strtold(const char* s, char** end_ptr) {
-#if __LP64__
+#if defined(__LP64__)
   long double result;
   __strtorQ(s, end_ptr, FLT_ROUNDS, &result);
   return result;

@@ -25,7 +25,7 @@
 #include "elf_traits.h"
 #include "libelf.h"
 
-#include "nativehelper/ScopedFd.h"
+#include <android-base/unique_fd.h>
 
 static void PrintUsage(const char* argv0) {
   std::string temporary = argv0;
@@ -94,7 +94,7 @@ int main(int argc, char* argv[]) {
   }
 
   const char* file = argv[argc - 1];
-  ScopedFd fd(open(file, O_RDWR));
+  android::base::unique_fd fd(open(file, O_RDWR));
   if (fd.get() == -1) {
     LOG(ERROR) << file << ": " << strerror(errno);
     return 1;
@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
   // We need to detect elf class in order to create
   // correct implementation
   uint8_t e_ident[EI_NIDENT];
-  if (TEMP_FAILURE_RETRY(read(fd.get(), e_ident, EI_NIDENT) != EI_NIDENT)) {
+  if (TEMP_FAILURE_RETRY(read(fd.get(), e_ident, EI_NIDENT)) != EI_NIDENT) {
     LOG(ERROR) << file << ": failed to read elf header:" << strerror(errno);
     return 1;
   }

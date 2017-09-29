@@ -16,245 +16,314 @@
 
 #include <gtest/gtest.h>
 
+#if defined(__BIONIC_LP32_USE_LONG_DOUBLE)
+#define COMPLEX_TEST complex_h_force_long_double
+#else
+#define COMPLEX_TEST complex_h
+#endif
+
+// This file is compiled against both glibc and bionic, and our complex.h
+// depends on bionic-specific macros, so hack around that.
+#include <sys/cdefs.h>
+#if !defined(__INTRODUCED_IN)
+#define __INTRODUCED_IN(x)
+#define __INTRODUCED_IN_32(x)
+#define __INTRODUCED_IN_64(x)
+#define __INTRODUCED_IN_FUTURE
+#define __RENAME_LDBL(a,b,c)
+#endif
+
 // libc++ actively gets in the way of including <complex.h> from C++, so we
-// have to declare the complex math functions ourselves.
+// have to be naughty.
+#include "../libc/include/complex.h"
+
 // (libc++ also seems to have really bad implementations of its own that ignore
 // the intricacies of floating point math.)
 // http://llvm.org/bugs/show_bug.cgi?id=21504
 
-#include <math.h> // For M_PI.
+#include <math.h> // For M_PI_2/M_PI_2l.
 
-extern "C" double cabs(double _Complex);
-TEST(complex, cabs) {
+#if 0
+// Note that gtest doesn't support complex numbers, so the output from
+// assertion failures is misleading/useless (at best you'll only see the real
+// part).
+// TODO: find out why gtest doesn't use these; until then they're only useful
+// for manual printf^Woperator<< debugging.
+#include <iostream>
+std::ostream& operator<<(std::ostream& os, const double _Complex c) {
+  os << "(" << creal(c) << "," << cimag(c) << "i)";
+ return os;
+}
+std::ostream& operator<<(std::ostream& os, const float _Complex c) {
+  os << "(" << crealf(c) << "," << cimagf(c) << "i)";
+  return os;
+}
+std::ostream& operator<<(std::ostream& os, const long double _Complex c) {
+  os << "(" << creall(c) << "," << cimagl(c) << "i)";
+  return os;
+}
+#endif
+
+TEST(COMPLEX_TEST, cabs) {
   ASSERT_EQ(0.0, cabs(0));
 }
 
-extern "C" float cabsf(float _Complex);
-TEST(complex, cabsf) {
+TEST(COMPLEX_TEST, cabsf) {
   ASSERT_EQ(0.0, cabsf(0));
 }
 
-extern "C" long double cabsl(long double _Complex);
-TEST(complex, cabsl) {
+TEST(COMPLEX_TEST, cabsl) {
   ASSERT_EQ(0.0, cabsl(0));
 }
 
-extern "C" double _Complex cacos(double _Complex);
-TEST(complex, cacos) {
-  ASSERT_EQ(M_PI/2.0, cacos(0.0));
+TEST(COMPLEX_TEST, cacos) {
+  ASSERT_EQ(M_PI_2, cacos(0.0));
 }
 
-extern "C" float _Complex cacosf(float _Complex);
-TEST(complex, cacosf) {
-  ASSERT_EQ(static_cast<float>(M_PI)/2.0f, cacosf(0.0));
+TEST(COMPLEX_TEST, cacosf) {
+  ASSERT_EQ(static_cast<float>(M_PI_2), cacosf(0.0));
 }
 
-extern "C" double _Complex cacosh(double _Complex);
-TEST(complex, cacosh) {
+TEST(COMPLEX_TEST, cacosl) {
+  ASSERT_EQ(M_PI_2l, cacosl(0.0));
+}
+
+TEST(COMPLEX_TEST, cacosh) {
   ASSERT_EQ(0.0, cacosh(1.0));
 }
 
-extern "C" float _Complex cacoshf(float _Complex);
-TEST(complex, cacoshf) {
+TEST(COMPLEX_TEST, cacoshl) {
+  ASSERT_EQ(0.0, cacoshl(1.0));
+}
+
+TEST(COMPLEX_TEST, cacoshf) {
   ASSERT_EQ(0.0, cacoshf(1.0));
 }
 
-extern "C" double carg(double _Complex);
-TEST(complex, carg) {
+TEST(COMPLEX_TEST, carg) {
   ASSERT_EQ(0.0, carg(0));
 }
 
-extern "C" float cargf(float _Complex);
-TEST(complex, cargf) {
+TEST(COMPLEX_TEST, cargf) {
   ASSERT_EQ(0.0, cargf(0));
 }
 
-extern "C" long double cargl(long double _Complex);
-TEST(complex, cargl) {
+TEST(COMPLEX_TEST, cargl) {
   ASSERT_EQ(0.0, cargl(0));
 }
 
-extern "C" double _Complex casin(double _Complex);
-TEST(complex, casin) {
+TEST(COMPLEX_TEST, casin) {
   ASSERT_EQ(0.0, casin(0));
 }
 
-extern "C" float _Complex casinf(float _Complex);
-TEST(complex, casinf) {
+TEST(COMPLEX_TEST, casinf) {
   ASSERT_EQ(0.0, casinf(0));
 }
 
-extern "C" double _Complex casinh(double _Complex);
-TEST(complex, casinh) {
+TEST(COMPLEX_TEST, casinl) {
+  ASSERT_EQ(0.0, casinl(0));
+}
+
+TEST(COMPLEX_TEST, casinh) {
   ASSERT_EQ(0.0, casinh(0));
 }
 
-extern "C" float _Complex casinhf(float _Complex);
-TEST(complex, casinhf) {
+TEST(COMPLEX_TEST, casinhf) {
   ASSERT_EQ(0.0, casinhf(0));
 }
 
-extern "C" double _Complex catan(double _Complex);
-TEST(complex, catan) {
+TEST(COMPLEX_TEST, casinhl) {
+  ASSERT_EQ(0.0, casinhl(0));
+}
+
+TEST(COMPLEX_TEST, catan) {
   ASSERT_EQ(0.0, catan(0));
 }
 
-extern "C" float _Complex catanf(float _Complex);
-TEST(complex, catanf) {
+TEST(COMPLEX_TEST, catanf) {
   ASSERT_EQ(0.0, catanf(0));
 }
 
-extern "C" double _Complex catanh(double _Complex);
-TEST(complex, catanh) {
+TEST(COMPLEX_TEST, catanl) {
+  ASSERT_EQ(0.0, catanl(0));
+}
+
+TEST(COMPLEX_TEST, catanh) {
   ASSERT_EQ(0.0, catanh(0));
 }
 
-extern "C" float _Complex catanhf(float _Complex);
-TEST(complex, catanhf) {
+TEST(COMPLEX_TEST, catanhf) {
   ASSERT_EQ(0.0, catanhf(0));
 }
 
-extern "C" double _Complex ccos(double _Complex);
-TEST(complex, ccos) {
+TEST(COMPLEX_TEST, catanhl) {
+  ASSERT_EQ(0.0, catanhl(0));
+}
+
+TEST(COMPLEX_TEST, ccos) {
   ASSERT_EQ(1.0, ccos(0));
 }
 
-extern "C" float _Complex ccosf(float _Complex);
-TEST(complex, ccosf) {
+TEST(COMPLEX_TEST, ccosf) {
   ASSERT_EQ(1.0, ccosf(0));
 }
 
-extern "C" double _Complex ccosh(double _Complex);
-TEST(complex, ccosh) {
+TEST(COMPLEX_TEST, ccosl) {
+  ASSERT_EQ(1.0, ccosl(0));
+}
+
+TEST(COMPLEX_TEST, ccosh) {
   ASSERT_EQ(1.0, ccosh(0));
 }
 
-extern "C" float _Complex ccoshf(float _Complex);
-TEST(complex, ccoshf) {
+TEST(COMPLEX_TEST, ccoshf) {
   ASSERT_EQ(1.0, ccoshf(0));
 }
 
-extern "C" double _Complex cexp(double _Complex);
-TEST(complex, cexp) {
+TEST(COMPLEX_TEST, ccoshl) {
+  ASSERT_EQ(1.0, ccoshl(0));
+}
+
+TEST(COMPLEX_TEST, cexp) {
   ASSERT_EQ(1.0, cexp(0));
 }
 
-extern "C" float _Complex cexpf(float _Complex);
-TEST(complex, cexpf) {
+TEST(COMPLEX_TEST, cexpf) {
   ASSERT_EQ(1.0, cexpf(0));
 }
 
-extern "C" double cimag(double _Complex);
-TEST(complex, cimag) {
+TEST(COMPLEX_TEST, cexpl) {
+  ASSERT_EQ(1.0, cexpl(0));
+}
+
+TEST(COMPLEX_TEST, cimag) {
   ASSERT_EQ(0.0, cimag(0));
 }
 
-extern "C" float cimagf(float _Complex);
-TEST(complex, cimagf) {
+TEST(COMPLEX_TEST, cimagf) {
   ASSERT_EQ(0.0f, cimagf(0));
 }
 
-extern "C" long double cimagl(long double _Complex);
-TEST(complex, cimagl) {
+TEST(COMPLEX_TEST, cimagl) {
   ASSERT_EQ(0.0, cimagl(0));
 }
 
-extern "C" double _Complex conj(double _Complex);
-TEST(complex, conj) {
+TEST(COMPLEX_TEST, clog) {
+  ASSERT_EQ(0.0, clog(1.0));
+}
+
+TEST(COMPLEX_TEST, clogf) {
+  ASSERT_EQ(0.0f, clogf(1.0f));
+}
+
+TEST(COMPLEX_TEST, clogl) {
+  ASSERT_EQ(0.0L, clogl(1.0L));
+}
+
+TEST(COMPLEX_TEST, conj) {
   ASSERT_EQ(0.0, conj(0));
 }
 
-extern "C" float _Complex conjf(float _Complex);
-TEST(complex, conjf) {
+TEST(COMPLEX_TEST, conjf) {
   ASSERT_EQ(0.0f, conjf(0));
 }
 
-extern "C" long double _Complex conjl(long double _Complex);
-TEST(complex, conjl) {
+TEST(COMPLEX_TEST, conjl) {
   ASSERT_EQ(0.0, conjl(0));
 }
 
-extern "C" double _Complex cproj(double _Complex);
-TEST(complex, cproj) {
+TEST(COMPLEX_TEST, cpow) {
+  ASSERT_EQ(8.0, cpow(2.0, 3.0));
+}
+
+TEST(COMPLEX_TEST, cpowf) {
+  ASSERT_EQ(8.0f, cpowf(2.0f, 3.0f));
+}
+
+TEST(COMPLEX_TEST, cpowl) {
+  ASSERT_EQ(8.0L, cpowl(2.0L, 3.0L));
+}
+
+TEST(COMPLEX_TEST, cproj) {
   ASSERT_EQ(0.0, cproj(0));
 }
 
-extern "C" float _Complex cprojf(float _Complex);
-TEST(complex, cprojf) {
+TEST(COMPLEX_TEST, cprojf) {
   ASSERT_EQ(0.0f, cprojf(0));
 }
 
-extern "C" long double _Complex cprojl(long double _Complex);
-TEST(complex, cprojl) {
+TEST(COMPLEX_TEST, cprojl) {
   ASSERT_EQ(0.0, cprojl(0));
 }
 
-extern "C" double creal(double _Complex);
-TEST(complex, creal) {
-  ASSERT_EQ(0.0, creal(0));
+TEST(COMPLEX_TEST, creal) {
+  ASSERT_EQ(2.0, creal(2.0 + 3.0I));
 }
 
-extern "C" float crealf(float _Complex);
-TEST(complex, crealf) {
-  ASSERT_EQ(0.0f, crealf(0));
+TEST(COMPLEX_TEST, crealf) {
+  ASSERT_EQ(2.0f, crealf(2.0f + 3.0fI));
 }
 
-extern "C" long double creall(long double _Complex);
-TEST(complex, creall) {
-  ASSERT_EQ(0.0, creall(0));
+TEST(COMPLEX_TEST, creall) {
+  ASSERT_EQ(2.0, creall(2.0L + 3.0LI));
 }
 
-extern "C" double _Complex csin(double _Complex);
-TEST(complex, csin) {
+TEST(COMPLEX_TEST, csin) {
   ASSERT_EQ(0.0, csin(0));
 }
 
-extern "C" float _Complex csinf(float _Complex);
-TEST(complex, csinf) {
+TEST(COMPLEX_TEST, csinf) {
   ASSERT_EQ(0.0, csinf(0));
 }
 
-extern "C" double _Complex csinh(double _Complex);
-TEST(complex, csinh) {
+TEST(COMPLEX_TEST, csinl) {
+  ASSERT_EQ(0.0, csinl(0));
+}
+
+TEST(COMPLEX_TEST, csinh) {
   ASSERT_EQ(0.0, csinh(0));
 }
 
-extern "C" float _Complex csinhf(float _Complex);
-TEST(complex, csinhf) {
+TEST(COMPLEX_TEST, csinhf) {
   ASSERT_EQ(0.0, csinhf(0));
 }
 
-extern "C" double _Complex csqrt(double _Complex);
-TEST(complex, csqrt) {
+TEST(COMPLEX_TEST, csinhl) {
+  ASSERT_EQ(0.0, csinhl(0));
+}
+
+TEST(COMPLEX_TEST, csqrt) {
   ASSERT_EQ(0.0, csqrt(0));
 }
 
-extern "C" float _Complex csqrtf(float _Complex);
-TEST(complex, csqrtf) {
-  ASSERT_EQ(0.0f, csqrt(0));
+TEST(COMPLEX_TEST, csqrtf) {
+  ASSERT_EQ(0.0f, csqrtf(0));
 }
 
-extern "C" long double _Complex csqrtl(long double _Complex);
-TEST(complex, csqrtl) {
+TEST(COMPLEX_TEST, csqrtl) {
   ASSERT_EQ(0.0, csqrtl(0));
 }
 
-extern "C" double _Complex ctan(double _Complex);
-TEST(complex, ctan) {
+TEST(COMPLEX_TEST, ctan) {
   ASSERT_EQ(0.0, ctan(0));
 }
 
-extern "C" float _Complex ctanf(float _Complex);
-TEST(complex, ctanf) {
+TEST(COMPLEX_TEST, ctanf) {
   ASSERT_EQ(0.0, ctanf(0));
 }
 
-extern "C" double _Complex ctanh(double _Complex);
-TEST(complex, ctanh) {
+TEST(COMPLEX_TEST, ctanl) {
+  ASSERT_EQ(0.0, ctanl(0));
+}
+
+TEST(COMPLEX_TEST, ctanh) {
   ASSERT_EQ(0.0, ctanh(0));
 }
 
-extern "C" float _Complex ctanhf(float _Complex);
-TEST(complex, ctanhf) {
+TEST(COMPLEX_TEST, ctanhf) {
   ASSERT_EQ(0.0, ctanhf(0));
+}
+
+TEST(COMPLEX_TEST, ctanhl) {
+  ASSERT_EQ(0.0, ctanhl(0));
 }

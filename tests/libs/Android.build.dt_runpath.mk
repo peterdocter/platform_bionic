@@ -18,6 +18,19 @@
 # Libraries used by dt_runpath tests.
 # -----------------------------------------------------------------------------
 
+#
+# Dependencies
+#
+# libtest_dt_runpath_d.so                       runpath: ${ORIGIN}/dt_runpath_b_c_x
+# |-> dt_runpath_b_c_x/libtest_dt_runpath_b.so  runpath: ${ORIGIN}/../dt_runpath_a
+# |   |-> dt_runpath_a/libtest_dt_runpath_a.so
+# |-> dt_runpath_b_c_x/libtest_dt_runpath_c.so  runpath: ${ORIGIN}/invalid_dt_runpath
+# |   |-> libtest_dt_runpath_a.so (soname)
+#
+# This one is used to test dlopen
+# dt_runpath_b_c_x/libtest_dt_runpath_x.so
+#
+
 # A leaf library in a non-standard directory.
 libtest_dt_runpath_a_src_files := \
     empty.cpp
@@ -54,8 +67,26 @@ libtest_dt_runpath_d_src_files := \
 
 libtest_dt_runpath_d_shared_libraries := libtest_dt_runpath_b libtest_dt_runpath_c
 libtest_dt_runpath_d_ldflags := -Wl,--rpath,\$${ORIGIN}/dt_runpath_b_c_x -Wl,--enable-new-dtags
+libtest_dt_runpath_d_ldlibs := -ldl
 module := libtest_dt_runpath_d
 include $(LOCAL_PATH)/Android.build.testlib.mk
+
+# D version for open-from-zip test with runpath
+module := libtest_dt_runpath_d_zip
+
+libtest_dt_runpath_d_zip_src_files := \
+    dlopen_b.cpp
+
+libtest_dt_runpath_d_zip_shared_libraries := libtest_dt_runpath_b libtest_dt_runpath_c
+libtest_dt_runpath_d_zip_ldflags := -Wl,--rpath,\$${ORIGIN}/dt_runpath_b_c_x -Wl,--enable-new-dtags
+libtest_dt_runpath_d_zip_ldlibs := -ldl
+libtest_dt_runpath_d_zip_install_to_native_tests_dir := $(module)
+
+module_tag := optional
+build_type := target
+build_target := SHARED_LIBRARY
+include $(TEST_PATH)/Android.build.mk
+
 
 # A leaf library in a directory library D has DT_RUNPATH for.
 libtest_dt_runpath_x_src_files := \
@@ -64,3 +95,4 @@ libtest_dt_runpath_x_src_files := \
 libtest_dt_runpath_x_relative_path := dt_runpath_b_c_x
 module := libtest_dt_runpath_x
 include $(LOCAL_PATH)/Android.build.testlib.mk
+

@@ -29,8 +29,8 @@
 #ifndef _SYS_STAT_H_
 #define _SYS_STAT_H_
 
+#include <bits/timespec.h>
 #include <linux/stat.h>
-#include <machine/timespec.h>
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
@@ -127,66 +127,70 @@ struct stat64 { __STAT64_BODY };
 #define st_atimensec st_atim.tv_nsec
 #define st_mtimensec st_mtim.tv_nsec
 #define st_ctimensec st_ctim.tv_nsec
+/* Compatibility with Linux headers and old NDKs. */
+#define st_atime_nsec st_atim.tv_nsec
+#define st_mtime_nsec st_mtim.tv_nsec
+#define st_ctime_nsec st_ctim.tv_nsec
 
-#ifdef __USE_BSD
+#if defined(__USE_BSD)
 /* Permission macros provided by glibc for compatibility with BSDs. */
 #define ACCESSPERMS (S_IRWXU | S_IRWXG | S_IRWXO) /* 0777 */
 #define ALLPERMS    (S_ISUID | S_ISGID | S_ISVTX | S_IRWXU | S_IRWXG | S_IRWXO) /* 07777 */
 #define DEFFILEMODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH) /* 0666 */
 #endif
 
-extern int chmod(const char*, mode_t);
-extern int fchmod(int, mode_t);
-extern int mkdir(const char*, mode_t);
-
-extern int fstat(int, struct stat*);
-extern int fstat64(int, struct stat64*);
-extern int fstatat(int, const char*, struct stat*, int);
-extern int fstatat64(int, const char*, struct stat64*, int);
-extern int lstat(const char*, struct stat*);
-extern int lstat64(const char*, struct stat64*);
-extern int stat(const char*, struct stat*);
-extern int stat64(const char*, struct stat64*);
-
-extern int mknod(const char*, mode_t, dev_t);
-extern mode_t umask(mode_t);
-
-extern mode_t __umask_chk(mode_t);
-extern mode_t __umask_real(mode_t) __RENAME(umask);
-__errordecl(__umask_invalid_mode, "umask called with invalid mode");
-
-#if defined(__BIONIC_FORTIFY)
-
-__BIONIC_FORTIFY_INLINE
-mode_t umask(mode_t mode) {
-#if !defined(__clang__)
-  if (__builtin_constant_p(mode)) {
-    if ((mode & 0777) != mode) {
-      __umask_invalid_mode();
-    }
-    return __umask_real(mode);
-  }
+#if defined(__USE_BSD) || defined(__USE_GNU)
+#define S_IREAD S_IRUSR
+#define S_IWRITE S_IWUSR
+#define S_IEXEC S_IXUSR
 #endif
-  return __umask_chk(mode);
-}
-#endif /* defined(__BIONIC_FORTIFY) */
 
-extern int mkfifo(const char*, mode_t) __INTRODUCED_IN(21);
-extern int mkfifoat(int, const char*, mode_t);
+/* POSIX mandates these, but Linux doesn't implement them as distinct file types. */
+#define S_TYPEISMQ(__sb) 0
+#define S_TYPEISSEM(__sb) 0
+#define S_TYPEISSHM(__sb) 0
+#define S_TYPEISTMO(__sb) 0
 
-extern int fchmodat(int, const char*, mode_t, int);
-extern int mkdirat(int, const char*, mode_t);
-extern int mknodat(int, const char*, mode_t, dev_t);
+int chmod(const char* __path, mode_t __mode);
+int fchmod(int __fd, mode_t __mode);
+int mkdir(const char* __path, mode_t __mode);
+
+int fstat(int __fd, struct stat* __buf);
+int fstat64(int __fd, struct stat64* __buf) __INTRODUCED_IN(21);
+int fstatat(int __dir_fd, const char* __path, struct stat* __buf, int __flags);
+int fstatat64(int __dir_fd, const char* __path, struct stat64* __buf, int __flags) __INTRODUCED_IN(21);
+int lstat(const char* __path, struct stat* __buf);
+int lstat64(const char* __path, struct stat64* __buf) __INTRODUCED_IN(21);
+int stat(const char* __path, struct stat* __buf);
+int stat64(const char* __path, struct stat64* __buf) __INTRODUCED_IN(21);
+
+int mknod(const char* __path, mode_t __mode, dev_t __dev);
+mode_t umask(mode_t __mask) __overloadable __RENAME_CLANG(umask);
+
+#if defined(__BIONIC_INCLUDE_FORTIFY_HEADERS)
+#include <bits/fortify/stat.h>
+#endif
+
+#if __ANDROID_API__ >= __ANDROID_API_L__
+int mkfifo(const char* __path, mode_t __mode) __INTRODUCED_IN(21);
+#else
+// Implemented as a static inline before 21.
+#endif
+
+int mkfifoat(int __dir_fd, const char* __path, mode_t __mode) __INTRODUCED_IN(23);
+
+int fchmodat(int __dir_fd, const char* __path, mode_t __mode, int __flags);
+int mkdirat(int __dir_fd, const char* __path, mode_t __mode);
+int mknodat(int __dir_fd, const char* __path, mode_t __mode, dev_t __dev) __INTRODUCED_IN(21);
 
 #define UTIME_NOW  ((1L << 30) - 1L)
 #define UTIME_OMIT ((1L << 30) - 2L)
-extern int utimensat(int fd, const char *path, const struct timespec times[2], int flags);
-extern int futimens(int fd, const struct timespec times[2]);
-
-#if __ANDROID_API__ < 21
-#include <android/legacy_sys_stat_inlines.h>
-#endif
+int utimensat(int __dir_fd, const char* __path, const struct timespec __times[2], int __flags)
+  __INTRODUCED_IN(12);
+int futimens(int __dir_fd, const struct timespec __times[2]) __INTRODUCED_IN(19);
 
 __END_DECLS
 
-#endif /* _SYS_STAT_H_ */
+#include <android/legacy_sys_stat_inlines.h>
+
+#endif

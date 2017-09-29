@@ -18,8 +18,19 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
+#include <sys/utsname.h>
+#include <sys/vfs.h>
 
 #include "TemporaryFile.h"
+
+#include <android-base/stringprintf.h>
+
+// Glibc v2.19 doesn't include these in fcntl.h so host builds will fail without.
+#if !defined(FALLOC_FL_PUNCH_HOLE) || !defined(FALLOC_FL_KEEP_SIZE)
+#include <linux/falloc.h>
+#include <linux/magic.h>
+#endif
 
 TEST(fcntl, fcntl_smoke) {
   int fd = open("/proc/version", O_RDONLY);
@@ -236,4 +247,96 @@ TEST(fcntl, tee) {
 
   ASSERT_STREQ(expected, buf1);
   ASSERT_STREQ(expected, buf2);
+}
+
+TEST(fcntl, readahead) {
+  // Just check that the function is available.
+  errno = 0;
+  ASSERT_EQ(-1, readahead(-1, 0, 123));
+  ASSERT_EQ(EBADF, errno);
+}
+
+TEST(fcntl, sync_file_range) {
+  // Just check that the function is available.
+  errno = 0;
+  ASSERT_EQ(-1, sync_file_range(-1, 0, 0, 0));
+  ASSERT_EQ(EBADF, errno);
+
+  TemporaryFile tf;
+  ASSERT_EQ(0, sync_file_range(tf.fd, 0, 0, 0));
+
+  // The arguments to the underlying system call are in a different order on 32-bit ARM.
+  // Check that the `flags` argument gets passed to the kernel correctly.
+  errno = 0;
+  ASSERT_EQ(-1, sync_file_range(tf.fd, 0, 0, ~0));
+  ASSERT_EQ(EINVAL, errno);
+}
+
+static bool parse_kernel_release(long* const major, long* const minor) {
+  struct utsname buf;
+  if (uname(&buf) == -1) {
+    return false;
+  }
+  return sscanf(buf.release, "%ld.%ld", major, minor) == 2;
+}
+
+/*
+ * b/28760453:
+ * Kernels older than 4.1 should have ext4 FALLOC_FL_PUNCH_HOLE disabled due to CVE-2015-8839.
+ * Devices that fail this test should cherry-pick the following commit:
+ * https://android.googlesource.com/kernel/msm/+/bdba352e898cbf57c8620ad68c8abf749c784d1f
+ */
+TEST(fcntl, falloc_punch) {
+  long major = 0, minor = 0;
+  ASSERT_TRUE(parse_kernel_release(&major, &minor));
+
+  if (major < 4 || (major == 4 && minor < 1)) {
+    TemporaryFile tf;
+    struct statfs sfs;
+    ASSERT_EQ(0, fstatfs(tf.fd, &sfs));
+    if (sfs.f_type == EXT4_SUPER_MAGIC) {
+      ASSERT_EQ(-1, fallocate(tf.fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, 1));
+      ASSERT_EQ(errno, EOPNOTSUPP);
+    }
+  }
+}
+
+TEST(fcntl, open_O_TMPFILE_mode) {
+#if __BIONIC__ // Our glibc is too old for O_TMPFILE.
+  TemporaryDir dir;
+  // Without O_EXCL, we're allowed to give this a name later.
+  // (This is unrelated to the O_CREAT interaction with O_EXCL.)
+  const mode_t perms = S_IRUSR | S_IWUSR;
+  int fd = open(dir.dirname, O_TMPFILE | O_RDWR, perms);
+
+  // Ignore kernels without O_TMPFILE support (< 3.11).
+  if (fd == -1 && (errno == EISDIR || errno == EINVAL || errno == EOPNOTSUPP)) return;
+
+  ASSERT_TRUE(fd != -1) << strerror(errno);
+
+  // Does the fd claim to have the mode we set?
+  struct stat sb = {};
+  ASSERT_EQ(0, fstat(fd, &sb));
+  ASSERT_EQ(perms, (sb.st_mode & ~S_IFMT));
+
+  std::string final_path = android::base::StringPrintf("%s/named_now", dir.dirname);
+  ASSERT_EQ(0, linkat(AT_FDCWD, android::base::StringPrintf("/proc/self/fd/%d", fd).c_str(),
+                      AT_FDCWD, final_path.c_str(),
+                      AT_SYMLINK_FOLLOW));
+  ASSERT_EQ(0, close(fd));
+
+  // Does the resulting file claim to have the mode we set?
+  ASSERT_EQ(0, stat(final_path.c_str(), &sb));
+  ASSERT_EQ(perms, (sb.st_mode & ~S_IFMT));
+
+  // With O_EXCL, you're not allowed to add a name later.
+  fd = open(dir.dirname, O_TMPFILE | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+  ASSERT_TRUE(fd != -1) << strerror(errno);
+  errno = 0;
+  ASSERT_EQ(-1, linkat(AT_FDCWD, android::base::StringPrintf("/proc/self/fd/%d", fd).c_str(),
+                       AT_FDCWD, android::base::StringPrintf("%s/no_chance", dir.dirname).c_str(),
+                       AT_SYMLINK_FOLLOW));
+  ASSERT_EQ(ENOENT, errno);
+  ASSERT_EQ(0, close(fd));
+#endif
 }

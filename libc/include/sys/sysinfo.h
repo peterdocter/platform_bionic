@@ -25,6 +25,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #ifndef _SYS_SYSINFO_H_
 #define _SYS_SYSINFO_H_
 
@@ -33,16 +34,12 @@
 
 __BEGIN_DECLS
 
-int sysinfo(struct sysinfo* info);
-
-int get_nprocs_conf(void);
-
-int get_nprocs(void);
-
-long get_phys_pages(void);
-
-long get_avphys_pages(void);
+int sysinfo(struct sysinfo* __info);
+int get_nprocs_conf(void) __INTRODUCED_IN(23);
+int get_nprocs(void) __INTRODUCED_IN(23);
+long get_phys_pages(void) __INTRODUCED_IN(23);
+long get_avphys_pages(void) __INTRODUCED_IN(23);
 
 __END_DECLS
 
-#endif /* _SYS_SYSINFO_H_ */
+#endif

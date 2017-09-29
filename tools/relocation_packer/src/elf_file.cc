@@ -234,24 +234,22 @@ bool ElfFile<ELF>::Load() {
   }
 
   // Loading failed if we did not find the required special sections.
-  if (!found_relocations_section) {
-    LOG(ERROR) << "Missing or empty .rel.dyn or .rela.dyn section";
-    return false;
-  }
   if (!found_dynamic_section) {
     LOG(ERROR) << "Missing .dynamic section";
     return false;
   }
 
-  // Loading failed if we could not identify the relocations type.
-  if (!has_rel_relocations && !has_rela_relocations) {
-    LOG(ERROR) << "No relocations sections found";
-    return false;
-  }
-  if (has_rel_relocations && has_rela_relocations) {
-    LOG(ERROR) << "Multiple relocations sections with different types found, "
-               << "not currently supported";
-    return false;
+  if (found_relocations_section != nullptr) {
+    // Loading failed if we could not identify the relocations type.
+    if (!has_rel_relocations && !has_rela_relocations) {
+      LOG(ERROR) << "No relocations sections found";
+      return false;
+    }
+    if (has_rel_relocations && has_rela_relocations) {
+      LOG(ERROR) << "Multiple relocations sections with different types found, "
+                 << "not currently supported";
+      return false;
+    }
   }
 
   elf_ = elf;
@@ -552,11 +550,11 @@ void ElfFile<ELF>::AdjustDynamicSectionForHole(Elf_Scn* dynamic_section,
               << " d_val adjusted to " << dynamic->d_un.d_val;
     }
 
-    // Special case: DT_MIPS_RLD_MAP2 stores the difference between dynamic
+    // Special case: DT_MIPS_RLD_MAP_REL stores the difference between dynamic
     // entry address and the address of the _r_debug (used by GDB)
     // since the dynamic section and target address are on the
     // different sides of the hole it needs to be adjusted accordingly
-    if (tag == DT_MIPS_RLD_MAP2) {
+    if (tag == DT_MIPS_RLD_MAP_REL) {
       dynamic->d_un.d_val += hole_size;
       VLOG(1) << "dynamic[" << i << "] " << dynamic->d_tag
               << " d_val adjusted to " << dynamic->d_un.d_val;
@@ -680,6 +678,11 @@ bool ElfFile<ELF>::PackRelocations() {
   if (!Load()) {
     LOG(ERROR) << "Failed to load as ELF";
     return false;
+  }
+
+  if (relocations_section_ == nullptr) {
+    // There is nothing to do
+    return true;
   }
 
   // Retrieve the current dynamic relocations section data.
@@ -829,6 +832,11 @@ bool ElfFile<ELF>::UnpackRelocations() {
   if (!Load()) {
     LOG(ERROR) << "Failed to load as ELF";
     return false;
+  }
+
+  if (relocations_section_ == nullptr) {
+    // There is nothing to do
+    return true;
   }
 
   typename ELF::Shdr* section_header = ELF::getshdr(relocations_section_);

@@ -42,23 +42,20 @@ __BEGIN_DECLS
 
 typedef unsigned long rlim_t;
 
-extern int getrlimit(int, struct rlimit*);
-extern int setrlimit(int, const struct rlimit*);
+int getrlimit(int __resource, struct rlimit* __limit);
+int setrlimit(int __resource, const struct rlimit* __limit);
 
-extern int getrlimit64(int, struct rlimit64*);
-extern int setrlimit64(int, const struct rlimit64*);
+int getrlimit64(int __resource, struct rlimit64* __limit) __INTRODUCED_IN(21);
+int setrlimit64(int __resource, const struct rlimit64* __limit) __INTRODUCED_IN(21);
 
-extern int getpriority(int, int);
-extern int setpriority(int, int, int);
+int getpriority(int __which, id_t __who);
+int setpriority(int __which, id_t __who, int __priority);
 
-extern int getrusage(int, struct rusage*);
+int getrusage(int __who, struct rusage* __usage);
 
-#if __LP64__
-/* Implementing prlimit for 32-bit isn't worth the effort. */
-extern int prlimit(pid_t, int, const struct rlimit*, struct rlimit*);
-#endif
-extern int prlimit64(pid_t, int, const struct rlimit64*, struct rlimit64*);
+int prlimit(pid_t __pid, int __resource, const struct rlimit* __new_limit, struct rlimit* __old_limit) __INTRODUCED_IN_32(24) __INTRODUCED_IN_64(21);
+int prlimit64(pid_t __pid, int __resource, const struct rlimit64* __new_limit, struct rlimit64* __old_limit) __INTRODUCED_IN(21);
 
 __END_DECLS
 
-#endif /* _SYS_RESOURCE_H_ */
+#endif

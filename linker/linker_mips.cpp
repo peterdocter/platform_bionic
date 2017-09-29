@@ -28,22 +28,16 @@
 
 #if !defined(__LP64__) && __mips_isa_rev >= 5
 #include <sys/prctl.h>
-#if defined(PR_SET_FP_MODE)
-#error "remove following defs when avail in Android's kernel headers"
-#else
-#define PR_SET_FP_MODE 45
-#define PR_GET_FP_MODE 46
-#define PR_FP_MODE_FR  (1 << 0)
-#define PR_FP_MODE_FRE (1 << 1)
-#endif
 #endif
 
 #include "linker.h"
 #include "linker_debug.h"
+#include "linker_globals.h"
 #include "linker_phdr.h"
 #include "linker_relocs.h"
 #include "linker_reloc_iterators.h"
 #include "linker_sleb128.h"
+#include "linker_soinfo.h"
 
 template bool soinfo::relocate<plain_reloc_iterator>(const VersionTracker& version_tracker,
                                                      plain_reloc_iterator&& rel_iterator,
@@ -75,7 +69,7 @@ bool soinfo::relocate(const VersionTracker& version_tracker,
     ElfW(Addr) sym_addr = 0;
     const char* sym_name = nullptr;
 
-    DEBUG("Processing '%s' relocation at index %zd", get_realpath(), idx);
+    DEBUG("Processing \"%s\" relocation at index %zd", get_realpath(), idx);
     if (type == R_GENERIC_NONE) {
       continue;
     }
@@ -264,18 +258,10 @@ bool soinfo::mips_check_and_adjust_fp_modes() {
 
   // FP ABI-variant compatibility checks for MIPS o32 ABI
   if (abiflags == nullptr) {
-    // Old compilers and some translators don't emit the new abiflags section.
-    const char* filename = get_realpath();
-    size_t len = strlen(filename);
-    if (len > 4 && (strcmp(filename+len-4, ".dex") == 0 ||
-                    strcmp(filename+len-4, ".oat") == 0   )) {
-      // Assume dex2oat is compatible with target
-      mips_fpabi = MIPS_ABI_FP_XX;
-    } else {
-      // Old Android compilers used -mfp32 -mdouble-float -modd-spreg defaults,
-      //   ie FP32 aka DOUBLE, using FR=0 mode fpregs & odd single-prec fpregs
-      mips_fpabi = MIPS_ABI_FP_DOUBLE;
-    }
+    // Old compilers lack the new abiflags section.
+    // These compilers used -mfp32 -mdouble-float -modd-spreg defaults,
+    //   ie FP32 aka DOUBLE, using odd-numbered single-prec regs
+    mips_fpabi = MIPS_ABI_FP_DOUBLE;
   } else {
     mips_fpabi = abiflags->fp_abi;
     if ( (abiflags->flags1 & MIPS_AFL_FLAGS1_ODDSPREG)

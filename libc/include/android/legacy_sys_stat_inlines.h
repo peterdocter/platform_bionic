@@ -30,13 +30,17 @@
 #define _ANDROID_LEGACY_SYS_STAT_INLINES_H_
 
 #include <sys/cdefs.h>
+#include <sys/stat.h>
+
+#if __ANDROID_API__ < __ANDROID_API_L__
 
 __BEGIN_DECLS
 
-static __inline int mkfifo(const char *__p, mode_t __m) {
-  return mknod(__p, (__m & ~S_IFMT) | S_IFIFO, (dev_t)0);
+static __inline int mkfifo(const char* __path, mode_t __mode) {
+  return mknod(__path, (__mode & ~S_IFMT) | S_IFIFO, (dev_t)0);
 }
 
 __END_DECLS
 
+#endif
 #endif /* _ANDROID_LEGACY_SYS_STAT_INLINES_H_ */

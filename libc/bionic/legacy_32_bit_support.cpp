@@ -37,7 +37,7 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
-#if __LP64__
+#if defined(__LP64__)
 #error This code is only needed on 32-bit systems!
 #endif
 
@@ -110,4 +110,23 @@ int getrlimit64(int resource, rlimit64* limits64) {
 // There is no setrlimit64 system call, so we need to use prlimit64.
 int setrlimit64(int resource, const rlimit64* limits64) {
   return prlimit64(0, resource, limits64, NULL);
+}
+
+// There is no prlimit system call, so we need to use prlimit64.
+int prlimit(pid_t pid, int resource, const rlimit* n32, rlimit* o32) {
+  rlimit64 n64;
+  if (n32 != nullptr) {
+    n64.rlim_cur = (n32->rlim_cur == RLIM_INFINITY) ? RLIM64_INFINITY : n32->rlim_cur;
+    n64.rlim_max = (n32->rlim_max == RLIM_INFINITY) ? RLIM64_INFINITY : n32->rlim_max;
+  }
+
+  rlimit64 o64;
+  int result = prlimit64(pid, resource,
+                         (n32 != nullptr) ? &n64 : nullptr,
+                         (o32 != nullptr) ? &o64 : nullptr);
+  if (result != -1 && o32 != nullptr) {
+    o32->rlim_cur = (o64.rlim_cur == RLIM64_INFINITY) ? RLIM_INFINITY : o64.rlim_cur;
+    o32->rlim_max = (o64.rlim_max == RLIM64_INFINITY) ? RLIM_INFINITY : o64.rlim_max;
+  }
+  return result;
 }

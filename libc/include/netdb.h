@@ -192,59 +192,37 @@ struct addrinfo {
  */
 #define	SCOPE_DELIMITER	'%'
 
+#define IPPORT_RESERVED 1024
+
 __BEGIN_DECLS
-#pragma GCC visibility push(default)
 
-/* BIONIC-BEGIN */
-#define  h_errno   (*__get_h_errno())
-int*  __get_h_errno(void);
-/* BIONIC-END */
-void endhostent(void);
-void endnetent(void);
-void endnetgrent(void);
-void endprotoent(void);
+#define h_errno (*__get_h_errno())
+int* __get_h_errno(void);
 void endservent(void);
-void freehostent(struct hostent *);
-struct hostent	*gethostbyaddr(const void *, socklen_t, int);
-int gethostbyaddr_r(const void *, socklen_t, int, struct hostent *, char *, size_t, struct hostent **, int *);
-struct hostent	*gethostbyname(const char *);
-int gethostbyname_r(const char *, struct hostent *, char *, size_t, struct hostent **, int *);
-struct hostent	*gethostbyname2(const char *, int);
-int gethostbyname2_r(const char *, int, struct hostent *, char *, size_t, struct hostent **, int *);
-struct hostent	*gethostent(void);
-int gethostent_r(struct hostent *, char *, size_t, struct hostent **, int *);
-struct hostent	*getipnodebyaddr(const void *, size_t, int, int *);
-struct hostent	*getipnodebyname(const char *, int, int, int *);
-struct netent	*getnetbyaddr(uint32_t, int);
-int getnetbyaddr_r(uint32_t, int, struct netent *, char *, size_t, struct netent**, int *);
-struct netent	*getnetbyname(const char *);
-int getnetbyname_r(const char *, struct netent *, char *, size_t, struct netent **, int *);
-struct netent	*getnetent(void);
-int getnetent_r(struct netent *, char *, size_t, struct netent **, int *);
-int getnetgrent(char **, char **, char **);
-struct protoent	*getprotobyname(const char *);
-int getprotobyname_r(const char *, struct protoent *, char *, size_t, struct protoent **);
-struct protoent	*getprotobynumber(int);
-int getprotobynumber_r(int, struct protoent *, char *, size_t, struct protoent **);
-struct protoent	*getprotoent(void);
-int getprotoent_r(struct protoent *, char *, size_t, struct protoent **);
-struct servent	*getservbyname(const char *, const char *);
-struct servent	*getservbyport(int, const char *);
-struct servent	*getservent(void);
-void herror(const char *);
-const char	*hstrerror(int);
-int innetgr(const char *, const char *, const char *, const char *);
-void sethostent(int);
-void setnetent(int);
-void setprotoent(int);
-int getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
-int getnameinfo(const struct sockaddr *, socklen_t, char *, size_t, char *, size_t, int);
-void freeaddrinfo(struct addrinfo *);
-const char	*gai_strerror(int);
-void setnetgrent(const char *);
-void setservent(int);
+struct hostent* gethostbyaddr(const void* __addr, socklen_t __length, int __type);
+int gethostbyaddr_r(const void* __addr, socklen_t __length, int __type, struct hostent* __ret, char* __buf, size_t __buf_size, struct hostent** __result, int* __h_errno_ptr) __INTRODUCED_IN(23);
+struct hostent* gethostbyname(const char* __name);
+int gethostbyname_r(const char* __name, struct hostent* __ret, char* __buf, size_t __buf_size, struct hostent** __result, int* __h_errno_ptr);
+struct hostent* gethostbyname2(const char* __name, int __af);
+int gethostbyname2_r(const char* __name, int __af, struct hostent* __ret, char* __buf, size_t __buf_size, struct hostent** __result, int* __h_errno_ptr) __INTRODUCED_IN(23);
+struct hostent* gethostent(void);
+struct netent* getnetbyaddr(uint32_t __net, int __type);
+struct netent* getnetbyname(const char* __name);
+struct protoent* getprotobyname(const char* __name);
+struct protoent* getprotobynumber(int __proto);
+struct servent* getservbyname(const char* __name, const char* __proto);
+struct servent* getservbyport(int __port, const char* __proto);
+struct servent* getservent(void);
+void herror(const char* __s);
+const char* hstrerror(int __error);
 
-#pragma GCC visibility pop
+int getaddrinfo(const char* __node, const char* __service, const struct addrinfo* __hints, struct addrinfo** __result);
+/* POSIX getnameinfo uses socklen_t, not size_t, but LP64 sizeof(socklen_t) != sizeof(size_t). */
+int getnameinfo(const struct sockaddr* __sa, socklen_t __sa_length, char* __host, size_t __host_length, char* __service, size_t __service_length, int __flags);
+void freeaddrinfo(struct addrinfo* __ptr);
+const char* gai_strerror(int __error);
+void setservent(int __stay_open);
+
 __END_DECLS
 
-#endif /* !_NETDB_H_ */
+#endif

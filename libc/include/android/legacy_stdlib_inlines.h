@@ -29,12 +29,25 @@
 #ifndef _ANDROID_LEGACY_STDLIB_INLINES_H_
 #define _ANDROID_LEGACY_STDLIB_INLINES_H_
 
+#include <errno.h>
+#include <float.h>
+#include <stdlib.h>
 #include <sys/cdefs.h>
+
+#if __ANDROID_API__ < __ANDROID_API_L__
 
 __BEGIN_DECLS
 
-static __inline float strtof(const char *nptr, char **endptr) {
-  return (float)strtod(nptr, endptr);
+static __inline float strtof(const char* nptr, char** endptr) {
+  double d = strtod(nptr, endptr);
+  if (d > FLT_MAX) {
+    errno = ERANGE;
+    return __builtin_huge_valf();
+  } else if (d < -FLT_MAX) {
+    errno = ERANGE;
+    return -__builtin_huge_valf();
+  }
+  return __BIONIC_CAST(static_cast, float, d);
 }
 
 static __inline double atof(const char *nptr) { return (strtod(nptr, NULL)); }
@@ -61,4 +74,5 @@ static __inline int grantpt(int __fd __attribute((unused))) {
 
 __END_DECLS
 
+#endif
 #endif /* _ANDROID_LEGACY_STDLIB_INLINES_H_ */

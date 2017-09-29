@@ -29,7 +29,6 @@
 /* Assumes neon instructions and a cache line size of 32 bytes. */
 
 #include <private/bionic_asm.h>
-#include <private/libc_events.h>
 
 /*
  * This code assumes it is running on a processor that supports all arm v7
@@ -43,42 +42,12 @@
         .thumb
         .thumb_func
 
-ENTRY(__memcpy_chk)
-        cmp         r2, r3
-        bhi         __memcpy_chk_fail
-
-        // Fall through to memcpy...
-END(__memcpy_chk)
-
 ENTRY(memcpy)
         pld     [r1, #64]
         stmfd   sp!, {r0, lr}
-        .cfi_def_cfa_offset 8
+        .cfi_adjust_cfa_offset 8
         .cfi_rel_offset r0, 0
         .cfi_rel_offset lr, 4
-END(memcpy)
 
-#define MEMCPY_BASE         __memcpy_base
-#define MEMCPY_BASE_ALIGNED __memcpy_base_aligned
 #include "memcpy_base.S"
-
-ENTRY_PRIVATE(__memcpy_chk_fail)
-        // Preserve lr for backtrace.
-        push    {lr}
-        .cfi_def_cfa_offset 4
-        .cfi_rel_offset lr, 0
-
-        ldr     r0, error_message
-        ldr     r1, error_code
-1:
-        add     r0, pc
-        bl      __fortify_chk_fail
-error_code:
-        .word   BIONIC_EVENT_MEMCPY_BUFFER_OVERFLOW
-error_message:
-        .word   error_string-(1b+4)
-END(__memcpy_chk_fail)
-
-        .data
-error_string:
-        .string     "memcpy: prevented write past end of buffer"
+END(memcpy)

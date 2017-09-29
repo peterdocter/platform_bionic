@@ -14,81 +14,160 @@
  * limitations under the License.
  */
 
+#include <err.h>
 #include <stdio.h>
 #include <stdio_ext.h>
 #include <stdlib.h>
 
-#include <benchmark/Benchmark.h>
+#include <android-base/test_utils.h>
+#include <benchmark/benchmark.h>
+#include "util.h"
 
-#define KB 1024
-#define MB 1024*KB
+static void FillFile(TemporaryFile& tf) {
+  char line[256];
+  memset(line, 'x', sizeof(line));
+  line[sizeof(line) - 1] = '\0';
 
-#define AT_COMMON_SIZES \
-    Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(8)->Arg(16)->Arg(32)->Arg(64)->Arg(512)-> \
-    Arg(1*KB)->Arg(4*KB)->Arg(8*KB)->Arg(16*KB)->Arg(64*KB)
+  FILE* fp = fopen(tf.path, "w");
+  for (size_t i = 0; i < 4096; ++i) fputs(line, fp);
+  fclose(fp);
+}
 
 template <typename Fn>
-void ReadWriteTest(::testing::Benchmark* benchmark, int iters, int chunk_size, Fn f, bool buffered) {
-  benchmark->StopBenchmarkTiming();
-  FILE* fp = fopen("/dev/zero", "rw");
+void ReadWriteTest(benchmark::State& state, Fn f, bool buffered) {
+  size_t chunk_size = state.range(0);
+
+  FILE* fp = fopen("/dev/zero", "r+e");
   __fsetlocking(fp, FSETLOCKING_BYCALLER);
   char* buf = new char[chunk_size];
-  benchmark->StartBenchmarkTiming();
 
   if (!buffered) {
     setvbuf(fp, 0, _IONBF, 0);
   }
 
-  for (int i = 0; i < iters; ++i) {
-    f(buf, chunk_size, 1, fp);
+  while (state.KeepRunning()) {
+    if (f(buf, chunk_size, 1, fp) != 1) {
+      errx(1, "ERROR: op of %zu bytes failed.", chunk_size);
+    }
   }
 
-  benchmark->StopBenchmarkTiming();
-  benchmark->SetBenchmarkBytesProcessed(int64_t(iters) * int64_t(chunk_size));
+  state.SetBytesProcessed(int64_t(state.iterations()) * int64_t(chunk_size));
   delete[] buf;
   fclose(fp);
 }
 
-BENCHMARK_WITH_ARG(BM_stdio_fread, int)->AT_COMMON_SIZES;
-void BM_stdio_fread::Run(int iters, int chunk_size) {
-  ReadWriteTest(this, iters, chunk_size, fread, true);
+void BM_stdio_fread(benchmark::State& state) {
+  ReadWriteTest(state, fread, true);
 }
+BIONIC_BENCHMARK(BM_stdio_fread);
 
-BENCHMARK_WITH_ARG(BM_stdio_fwrite, int)->AT_COMMON_SIZES;
-void BM_stdio_fwrite::Run(int iters, int chunk_size) {
-  ReadWriteTest(this, iters, chunk_size, fwrite, true);
+void BM_stdio_fwrite(benchmark::State& state) {
+  ReadWriteTest(state, fwrite, true);
 }
+BIONIC_BENCHMARK(BM_stdio_fwrite);
 
-BENCHMARK_WITH_ARG(BM_stdio_fread_unbuffered, int)->AT_COMMON_SIZES;
-void BM_stdio_fread_unbuffered::Run(int iters, int chunk_size) {
-  ReadWriteTest(this, iters, chunk_size, fread, false);
+void BM_stdio_fread_unbuffered(benchmark::State& state) {
+  ReadWriteTest(state, fread, false);
 }
+BIONIC_BENCHMARK(BM_stdio_fread_unbuffered);
 
-BENCHMARK_WITH_ARG(BM_stdio_fwrite_unbuffered, int)->AT_COMMON_SIZES;
-void BM_stdio_fwrite_unbuffered::Run(int iters, int chunk_size) {
-  ReadWriteTest(this, iters, chunk_size, fwrite, false);
+void BM_stdio_fwrite_unbuffered(benchmark::State& state) {
+  ReadWriteTest(state, fwrite, false);
 }
+BIONIC_BENCHMARK(BM_stdio_fwrite_unbuffered);
 
-static void FopenFgetsFclose(int iters, bool no_locking) {
-  char buf[1024];
-  for (int i = 0; i < iters; ++i) {
-    FILE* fp = fopen("/proc/version", "re");
+#if !defined(__GLIBC__)
+static void FopenFgetlnFclose(benchmark::State& state, bool no_locking) {
+  TemporaryFile tf;
+  FillFile(tf);
+  while (state.KeepRunning()) {
+    FILE* fp = fopen(tf.path, "re");
     if (no_locking) __fsetlocking(fp, FSETLOCKING_BYCALLER);
-    if (fgets(buf, sizeof(buf), fp) == nullptr) abort();
+    size_t length;
+    while (fgetln(fp, &length) != nullptr) {
+    }
     fclose(fp);
   }
 }
 
-BENCHMARK_NO_ARG(BM_stdio_fopen_fgets_fclose_locking);
-void BM_stdio_fopen_fgets_fclose_locking::Run(int iters) {
-  StartBenchmarkTiming();
-  FopenFgetsFclose(iters, false);
-  StopBenchmarkTiming();
+static void BM_stdio_fopen_fgetln_fclose_locking(benchmark::State& state) {
+  FopenFgetlnFclose(state, false);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_fgetln_fclose_locking);
+
+void BM_stdio_fopen_fgetln_fclose_no_locking(benchmark::State& state) {
+  FopenFgetlnFclose(state, true);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_fgetln_fclose_no_locking);
+#endif
+
+static void FopenFgetsFclose(benchmark::State& state, bool no_locking) {
+  TemporaryFile tf;
+  FillFile(tf);
+  char buf[BUFSIZ];
+  while (state.KeepRunning()) {
+    FILE* fp = fopen(tf.path, "re");
+    if (no_locking) __fsetlocking(fp, FSETLOCKING_BYCALLER);
+    while (fgets(buf, sizeof(buf), fp) != nullptr) {
+    }
+    fclose(fp);
+  }
 }
 
-BENCHMARK_NO_ARG(BM_stdio_fopen_fgets_fclose_no_locking);
-void BM_stdio_fopen_fgets_fclose_no_locking::Run(int iters) {
-  StartBenchmarkTiming();
-  FopenFgetsFclose(iters, true);
-  StopBenchmarkTiming();
+static void BM_stdio_fopen_fgets_fclose_locking(benchmark::State& state) {
+  FopenFgetsFclose(state, false);
 }
+BIONIC_BENCHMARK(BM_stdio_fopen_fgets_fclose_locking);
+
+void BM_stdio_fopen_fgets_fclose_no_locking(benchmark::State& state) {
+  FopenFgetsFclose(state, true);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_fgets_fclose_no_locking);
+
+static void FopenGetlineFclose(benchmark::State& state, bool no_locking) {
+  TemporaryFile tf;
+  FillFile(tf);
+  while (state.KeepRunning()) {
+    FILE* fp = fopen(tf.path, "re");
+    if (no_locking) __fsetlocking(fp, FSETLOCKING_BYCALLER);
+    char* line = nullptr;
+    size_t n = 0;
+    while (getline(&line, &n, fp) != -1) {
+    }
+    free(line);
+    fclose(fp);
+  }
+}
+
+static void BM_stdio_fopen_getline_fclose_locking(benchmark::State& state) {
+  FopenGetlineFclose(state, false);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_getline_fclose_locking);
+
+void BM_stdio_fopen_getline_fclose_no_locking(benchmark::State& state) {
+  FopenGetlineFclose(state, true);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_getline_fclose_no_locking);
+
+static void FopenFgetcFclose(benchmark::State& state, bool no_locking) {
+  size_t nbytes = state.range(0);
+  while (state.KeepRunning()) {
+    FILE* fp = fopen("/dev/zero", "re");
+    if (no_locking) __fsetlocking(fp, FSETLOCKING_BYCALLER);
+    volatile int c __attribute__((unused));
+    for (size_t i = 0; i < nbytes; ++i) {
+      c = fgetc(fp);
+    }
+    fclose(fp);
+  }
+}
+
+static void BM_stdio_fopen_fgetc_fclose_locking(benchmark::State& state) {
+  FopenFgetcFclose(state, false);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_fgetc_fclose_locking);
+
+void BM_stdio_fopen_fgetc_fclose_no_locking(benchmark::State& state) {
+  FopenFgetcFclose(state, true);
+}
+BIONIC_BENCHMARK(BM_stdio_fopen_fgetc_fclose_no_locking);

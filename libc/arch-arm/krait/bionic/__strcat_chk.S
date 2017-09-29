@@ -27,12 +27,15 @@
  */
 
 #include <private/bionic_asm.h>
-#include <private/libc_events.h>
 
     .syntax unified
 
     .thumb
     .thumb_func
+
+    // To avoid warning about deprecated instructions, add an explicit
+    // arch. The code generated is exactly the same.
+    .arch armv7-a
 
 // Get the length of src string, then get the source of the dst string.
 // Check that the two lengths together don't exceed the threshold, then
@@ -40,7 +43,7 @@
 ENTRY(__strcat_chk)
     pld     [r0, #0]
     push    {r0, lr}
-    .cfi_def_cfa_offset 8
+    .cfi_adjust_cfa_offset 8
     .cfi_rel_offset r0, 0
     .cfi_rel_offset lr, 4
     push    {r4, r5}
@@ -177,7 +180,9 @@ ENTRY(__strcat_chk)
 .L_strlen_done:
     add     r2, r3, r4
     cmp     r2, lr
-    bhi     __strcat_chk_failed
+    itt     hi
+    movhi   r0, lr
+    bhi     __strcat_chk_fail
 
     // Set up the registers for the memcpy code.
     mov     r1, r5
@@ -185,31 +190,14 @@ ENTRY(__strcat_chk)
     mov     r2, r4
     add     r0, r0, r3
     pop     {r4, r5}
-END(__strcat_chk)
+    .cfi_adjust_cfa_offset -8
+    .cfi_restore r4
+    .cfi_restore r5
 
-#define MEMCPY_BASE         __strcat_chk_memcpy_base
-#define MEMCPY_BASE_ALIGNED __strcat_chk_memcpy_base_aligned
 #include "memcpy_base.S"
 
-ENTRY_PRIVATE(__strcat_chk_failed)
-    .cfi_def_cfa_offset 8
-    .cfi_rel_offset r0, 0
-    .cfi_rel_offset lr, 4
+    // Undo the above cfi directives.
     .cfi_adjust_cfa_offset 8
     .cfi_rel_offset r4, 0
     .cfi_rel_offset r5, 4
-
-    ldr     r0, error_message
-    ldr     r1, error_code
-1:
-    add     r0, pc
-    bl      __fortify_chk_fail
-error_code:
-    .word   BIONIC_EVENT_STRCAT_BUFFER_OVERFLOW
-error_message:
-    .word   error_string-(1b+4)
-END(__strcat_chk_failed)
-
-    .data
-error_string:
-    .string "strcat: prevented write past end of buffer"
+END(__strcat_chk)

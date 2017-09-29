@@ -34,8 +34,8 @@
 
 __BEGIN_DECLS
 
-extern int personality (unsigned int persona);
+int personality(unsigned int __persona) __INTRODUCED_IN(15);
 
 __END_DECLS
 
-#endif /* _SYS_PERSONALITY_H_ */
+#endif

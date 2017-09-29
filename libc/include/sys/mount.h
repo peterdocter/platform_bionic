@@ -41,10 +41,10 @@ __BEGIN_DECLS
 #define MNT_EXPIRE 4
 #define UMOUNT_NOFOLLOW 8
 
-extern int mount(const char*, const char*, const char*, unsigned long, const void*);
-extern int umount(const char*);
-extern int umount2(const char*, int);
+int mount(const char* __source, const char* __target, const char* __fs_type, unsigned long __flags, const void* __data);
+int umount(const char* __target);
+int umount2(const char* __target, int __flags);
 
 __END_DECLS
 
-#endif /* _SYS_MOUNT_H */
+#endif

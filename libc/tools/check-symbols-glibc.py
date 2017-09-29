@@ -71,11 +71,15 @@ glibc = set(map(MangleGlibcNameToBionic, glibc))
 
 # bionic includes various BSD symbols to ease porting other BSD-licensed code.
 bsd_stuff = set([
+  'arc4random',
+  'arc4random_buf',
+  'arc4random_uniform',
   'basename_r',
   'dirname_r',
   'fgetln',
   'fpurge',
   'funopen',
+  'funopen64',
   'gamma_r',
   'gammaf_r',
   'getprogname',
@@ -84,13 +88,19 @@ bsd_stuff = set([
   'strlcpy',
   'sys_signame',
   'wcslcat',
-  'wcslcpy'
+  'wcslcpy',
 ])
 # Some symbols are part of the FORTIFY implementation.
 FORTIFY_stuff = set([
   '__FD_CLR_chk',
   '__FD_ISSET_chk',
   '__FD_SET_chk',
+  '__fwrite_chk',
+  '__memchr_chk',
+  '__memrchr_chk',
+  '__pwrite64_chk',
+  '__pwrite_chk',
+  '__sendto_chk',
   '__stack_chk_guard',
   '__stpncpy_chk2',
   '__strchr_chk',
@@ -99,14 +109,16 @@ FORTIFY_stuff = set([
   '__strlen_chk',
   '__strncpy_chk2',
   '__strrchr_chk',
-  '__umask_chk'
+  '__umask_chk',
+  '__write_chk',
 ])
-# Some symbols are used to implement public macros.
+# Some symbols are used to implement public functions/macros.
 macro_stuff = set([
   '__assert2',
   '__errno',
   '__fe_dfl_env',
   '__get_h_errno',
+  '__gnu_strerror_r',
   '__fpclassifyd',
   '__isfinite',
   '__isfinitef',
@@ -122,7 +134,8 @@ macro_stuff = set([
 linux_stuff = set([
   'getauxval',
   'gettid',
-  'tgkill'
+  'pthread_gettid_np',
+  'tgkill',
 ])
 # Some standard stuff isn't yet in the versions of glibc we're using.
 std_stuff = set([
@@ -158,6 +171,7 @@ weird_stuff = set([
 libresolv_stuff = set([
   '__res_send_setqhook',
   '__res_send_setrhook',
+  '_resolv_delete_cache_for_net',
   '_resolv_flush_cache_for_net',
   '_resolv_set_nameservers_for_net',
   'dn_expand',
@@ -168,6 +182,45 @@ known = set([
   '_ctype_',
   '__libc_init',
 ])
+# POSIX has some stuff that's too stupid for words (a64l) or not actually
+# implemented in glibc unless you count always failing with ENOSYS as
+# being implemented (fattach).
+in_posix_and_glibc_but_dead_or_useless = set([
+  'a64l', # obsolete
+  'confstr', # obsolete
+  'fattach', # obsolete
+  'fdetach', # obsolete
+  'gethostid', # obsolete
+  'getmsg', # obsolete
+  'getpmsg', # obsolete
+  'getutxent', # no utmp on Android
+  'getutxid', # no utmp on Android
+  'getutxline', # no utmp on Android
+  'isastream', # obsolete
+  'l64a', # obsolete
+  'mq_close', # disallowed by SELinux
+  'mq_getattr', # disallowed by SELinux
+  'mq_notify', # disallowed by SELinux
+  'mq_open', # disallowed by SELinux
+  'mq_receive', # disallowed by SELinux
+  'mq_send', # disallowed by SELinux
+  'mq_setattr', # disallowed by SELinux
+  'mq_timedreceive', # disallowed by SELinux
+  'mq_timedsend', # disallowed by SELinux
+  'mq_unlink', # disallowed by SELinux
+  'putmsg', # obsolete
+  'putpmsg', # obsolete
+  'pututxline', # no utmp on Android
+  'shm_open', # disallowed by SELinux
+  'shm_unlink', # disallowed by SELinux
+  'setutxent', # no utmp on Android
+  'strfmon', # icu4c
+  'strfmon_l', # icu4c
+  'ulimit', # obsolete
+])
+
+posix = posix - in_posix_and_glibc_but_dead_or_useless
+glibc = glibc - in_posix_and_glibc_but_dead_or_useless
 
 if not only_unwanted:
   #print 'glibc:'

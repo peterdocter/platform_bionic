@@ -21,12 +21,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#if defined(__BIONIC__)
 static int child_fn(void* i_ptr) {
   *reinterpret_cast<int*>(i_ptr) = 42;
   return 123;
 }
 
+#if defined(__BIONIC__)
 TEST(sched, clone) {
   void* child_stack[1024];
 
@@ -55,7 +55,15 @@ TEST(sched, clone_errno) {
   // Check that our hand-written clone assembler sets errno correctly on failure.
   uintptr_t fake_child_stack[16];
   errno = 0;
-  ASSERT_EQ(-1, clone(NULL, &fake_child_stack[16], CLONE_THREAD, NULL));
+  // If CLONE_THREAD is set, CLONE_SIGHAND must be set too.
+  ASSERT_EQ(-1, clone(child_fn, &fake_child_stack[16], CLONE_THREAD, NULL));
+  ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sched, clone_null_child_stack) {
+  int i = 0;
+  errno = 0;
+  ASSERT_EQ(-1, clone(child_fn, nullptr, CLONE_VM, &i));
   ASSERT_EQ(EINVAL, errno);
 }
 
@@ -261,4 +269,35 @@ TEST(sched, cpu_equal_s) {
 
   CPU_FREE(set1);
   CPU_FREE(set2);
+}
+
+TEST(sched, sched_get_priority_min_sched_get_priority_max) {
+  EXPECT_LE(sched_get_priority_min(SCHED_BATCH), sched_get_priority_max(SCHED_BATCH));
+  EXPECT_LE(sched_get_priority_min(SCHED_FIFO), sched_get_priority_max(SCHED_FIFO));
+  EXPECT_LE(sched_get_priority_min(SCHED_IDLE), sched_get_priority_max(SCHED_IDLE));
+  EXPECT_LE(sched_get_priority_min(SCHED_OTHER), sched_get_priority_max(SCHED_OTHER));
+  EXPECT_LE(sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR));
+}
+
+TEST(sched, sched_getscheduler_sched_setscheduler) {
+  // POSIX: "If pid is zero, the scheduling policy shall be returned for the
+  // calling process".
+  ASSERT_EQ(sched_getscheduler(getpid()), sched_getscheduler(0));
+
+  const int original_policy = sched_getscheduler(getpid());
+  sched_param p = {};
+  p.sched_priority = sched_get_priority_min(original_policy);
+  errno = 0;
+  ASSERT_EQ(-1, sched_setscheduler(getpid(), INT_MAX, &p));
+  ASSERT_EQ(EINVAL, errno);
+
+  ASSERT_EQ(0, sched_getparam(getpid(), &p));
+  ASSERT_EQ(original_policy, sched_setscheduler(getpid(), SCHED_BATCH, &p));
+  // POSIX says this should return the previous policy (here SCHED_BATCH),
+  // but the Linux system call doesn't, and the glibc wrapper doesn't correct
+  // this (the "returns 0" behavior is even documented on the man page in
+  // the BUGS section). This was our historical behavior too, so in the
+  // absence of reasons to break compatibility with ourselves and glibc, we
+  // don't behave as POSIX specifies. http://b/26203902.
+  ASSERT_EQ(0, sched_setscheduler(getpid(), original_policy, &p));
 }
