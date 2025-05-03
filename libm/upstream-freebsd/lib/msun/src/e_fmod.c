@@ -1,5 +1,4 @@
 
-/* @(#)e_fmod.c 1.3 95/01/18 */
 /*
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -11,14 +10,13 @@
  * ====================================================
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 /* 
- * __ieee754_fmod(x,y)
+ * fmod(x,y)
  * Return x mod y in exact arithmetic
  * Method: shift and subtract
  */
+
+#include <float.h>
 
 #include "math.h"
 #include "math_private.h"
@@ -26,7 +24,7 @@ __FBSDID("$FreeBSD$");
 static const double one = 1.0, Zero[] = {0.0, -0.0,};
 
 double
-__ieee754_fmod(double x, double y)
+fmod(double x, double y)
 {
 	int32_t n,hx,hy,hz,ix,iy,sx,i;
 	u_int32_t lx,ly,lz;
@@ -40,7 +38,7 @@ __ieee754_fmod(double x, double y)
     /* purge off exception values */
 	if((hy|ly)==0||(hx>=0x7ff00000)||	/* y=0,or x not finite */
 	  ((hy|((ly|-ly)>>31))>0x7ff00000))	/* or y is NaN */
-	    return (x*y)/(x*y);
+	    return nan_mix_op(x, y, *)/nan_mix_op(x, y, *);
 	if(hx<=hy) {
 	    if((hx<hy)||(lx<ly)) return x;	/* |x|<|y| return x */
 	    if(lx==ly) 
@@ -130,3 +128,7 @@ __ieee754_fmod(double x, double y)
 	}
 	return x;		/* exact output */
 }
+
+#if (LDBL_MANT_DIG == 53)
+__weak_reference(fmod, fmodl);
+#endif

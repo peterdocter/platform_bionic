@@ -29,20 +29,16 @@
 #include <mntent.h>
 #include <string.h>
 
-#include "private/ThreadLocalBuffer.h"
-
-static ThreadLocalBuffer<mntent> g_getmntent_mntent_tls_buffer;
-static ThreadLocalBuffer<char, BUFSIZ> g_getmntent_strings_tls_buffer;
+#include "bionic/pthread_internal.h"
 
 mntent* getmntent(FILE* fp) {
-  return getmntent_r(fp, g_getmntent_mntent_tls_buffer.get(),
-                     g_getmntent_strings_tls_buffer.get(),
-                     g_getmntent_strings_tls_buffer.size());
+  auto& tls = __get_bionic_tls();
+  return getmntent_r(fp, &tls.mntent_buf, tls.mntent_strings, sizeof(tls.mntent_strings));
 }
 
 mntent* getmntent_r(FILE* fp, struct mntent* e, char* buf, int buf_len) {
   memset(e, 0, sizeof(*e));
-  while (fgets(buf, buf_len, fp) != NULL) {
+  while (fgets(buf, buf_len, fp) != nullptr) {
     // Entries look like "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0".
     // That is: mnt_fsname mnt_dir mnt_type mnt_opts 0 0.
     int fsname0, fsname1, dir0, dir1, type0, type1, opts0, opts1;
@@ -64,7 +60,7 @@ mntent* getmntent_r(FILE* fp, struct mntent* e, char* buf, int buf_len) {
       return e;
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 FILE* setmntent(const char* path, const char* mode) {
@@ -72,8 +68,29 @@ FILE* setmntent(const char* path, const char* mode) {
 }
 
 int endmntent(FILE* fp) {
-  if (fp != NULL) {
+  if (fp != nullptr) {
     fclose(fp);
   }
   return 1;
+}
+
+char* hasmntopt(const struct mntent* mnt, const char* opt) {
+  char* token = mnt->mnt_opts;
+  char* const end = mnt->mnt_opts + strlen(mnt->mnt_opts);
+  const size_t optLen = strlen(opt);
+
+  while (token) {
+    char* const tokenEnd = token + optLen;
+    if (tokenEnd > end) break;
+
+    if (memcmp(token, opt, optLen) == 0 &&
+        (*tokenEnd == '\0' || *tokenEnd == ',' || *tokenEnd == '=')) {
+      return token;
+    }
+
+    token = strchr(token, ',');
+    if (token) token++;
+  }
+
+  return nullptr;
 }

@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2011 David Schultz <das@FreeBSD.ORG>
  * All rights reserved.
  *
@@ -24,10 +26,8 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/s_cexp.c 275819 2014-12-16 09:21:56Z ed $");
-
 #include <complex.h>
+#include <float.h>
 #include <math.h>
 
 #include "math_private.h"
@@ -39,7 +39,7 @@ cexp_ovfl = 0x4096b8e4;			/* (MAX_EXP - MIN_DENORM_EXP) * ln2 */
 double complex
 cexp(double complex z)
 {
-	double x, y, exp_x;
+	double c, exp_x, s, x, y;
 	uint32_t hx, hy, lx, ly;
 
 	x = creal(z);
@@ -53,8 +53,10 @@ cexp(double complex z)
 		return (CMPLX(exp(x), y));
 	EXTRACT_WORDS(hx, lx, x);
 	/* cexp(0 + I y) = cos(y) + I sin(y) */
-	if (((hx & 0x7fffffff) | lx) == 0)
-		return (CMPLX(cos(y), sin(y)));
+	if (((hx & 0x7fffffff) | lx) == 0) {
+		sincos(y, &s, &c);
+		return (CMPLX(c, s));
+	}
 
 	if (hy >= 0x7ff00000) {
 		if (lx != 0 || (hx & 0x7fffffff) != 0x7ff00000) {
@@ -84,6 +86,11 @@ cexp(double complex z)
 		 *  -  x = NaN (spurious inexact exception from y)
 		 */
 		exp_x = exp(x);
-		return (CMPLX(exp_x * cos(y), exp_x * sin(y)));
+		sincos(y, &s, &c);
+		return (CMPLX(exp_x * c, exp_x * s));
 	}
 }
+
+#if (LDBL_MANT_DIG == 53)
+__weak_reference(cexp, cexpl);
+#endif

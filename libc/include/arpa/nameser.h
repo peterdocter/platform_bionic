@@ -55,8 +55,9 @@
 
 #define BIND_4_COMPAT
 
-#include <sys/types.h>
 #include <sys/cdefs.h>
+
+#include <sys/types.h>
 
 /*
  * Revision information.  This is the release date in YYYYMMDD format.
@@ -113,6 +114,8 @@ typedef u_char ns_nname[NS_MAXNNAME];
 typedef const u_char *ns_nname_ct;
 typedef u_char *ns_nname_t;
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
 struct ns_namemap { ns_nname_ct base; int len; };
 typedef struct ns_namemap *ns_namemap_t;
 typedef const struct ns_namemap *ns_namemap_ct;
@@ -140,10 +143,6 @@ struct ns_newmsg {
 	const u_char	**lastdnptr;
 };
 typedef struct ns_newmsg ns_newmsg;
-
-/* Private data structure - do not use from outside library. */
-struct _ns_flagdata {  int mask, shift;  };
-extern const struct _ns_flagdata _ns_flagdata[];
 
 /* Accessor macros - this is part of the public interface. */
 
@@ -272,6 +271,8 @@ struct ns_tcp_tsig_state {
 	int siglen;
 };
 typedef struct ns_tcp_tsig_state ns_tcp_tsig_state;
+
+#pragma clang diagnostic pop
 
 #define NS_TSIG_FUDGE 300
 #define NS_TSIG_TCP_COUNT 100
@@ -478,6 +479,7 @@ typedef enum __ns_cert_types {
  */
 #define NS_OPT_DNSSEC_OK	0x8000U
 #define NS_OPT_NSID             3
+#define NS_OPT_PADDING          12
 
 /*
  * Inline versions of get/put short/long.  Pointer is advanced.
@@ -518,118 +520,62 @@ typedef enum __ns_cert_types {
 	(cp) += NS_INT32SZ; \
 } while (/*CONSTCOND*/0)
 
+__BEGIN_DECLS
+
 #if !defined(__LP64__)
 /* Annoyingly, LP32 shipped with __ names. */
-#define	ns_msg_getflag		__ns_msg_getflag
-#define ns_get16		__ns_get16
-#define ns_get32		__ns_get32
-#define ns_put16		__ns_put16
-#define ns_put32		__ns_put32
-#define ns_initparse		__ns_initparse
-#define ns_skiprr		__ns_skiprr
-#define ns_parserr		__ns_parserr
-#define ns_parserr2		__ns_parserr2
-#define	ns_sprintrr		__ns_sprintrr
-#define	ns_sprintrrf		__ns_sprintrrf
-#define	ns_format_ttl		__ns_format_ttl
-#define	ns_parse_ttl		__ns_parse_ttl
-#define ns_datetosecs		__ns_datetosecs
-#define	ns_name_ntol		__ns_name_ntol
-#define	ns_name_ntop		__ns_name_ntop
-#define	ns_name_pton		__ns_name_pton
-#define	ns_name_pton2		__ns_name_pton2
-#define	ns_name_unpack		__ns_name_unpack
-#define	ns_name_unpack2		__ns_name_unpack2
-#define	ns_name_pack		__ns_name_pack
-#define	ns_name_compress	__ns_name_compress
-#define	ns_name_uncompress	__ns_name_uncompress
-#define	ns_name_skip		__ns_name_skip
-#define	ns_name_rollback	__ns_name_rollback
-#define	ns_name_length		__ns_name_length
-#define	ns_name_eq		__ns_name_eq
-#define	ns_name_owned		__ns_name_owned
-#define	ns_name_map		__ns_name_map
-#define	ns_name_labels		__ns_name_labels
-#define	ns_sign			__ns_sign
-#define	ns_sign2		__ns_sign2
-#define	ns_sign_tcp		__ns_sign_tcp
-#define	ns_sign_tcp2		__ns_sign_tcp2
-#define	ns_sign_tcp_init	__ns_sign_tcp_init
-#define ns_find_tsig		__ns_find_tsig
-#define	ns_verify		__ns_verify
-#define	ns_verify_tcp		__ns_verify_tcp
-#define	ns_verify_tcp_init	__ns_verify_tcp_init
-#define	ns_samedomain		__ns_samedomain
-#define	ns_subdomain		__ns_subdomain
-#define	ns_makecanon		__ns_makecanon
-#define	ns_samename		__ns_samename
+#define ns_format_ttl __ns_format_ttl
+#define ns_get16 __ns_get16
+#define ns_get32 __ns_get32
+#define ns_initparse __ns_initparse
+#define ns_makecanon __ns_makecanon
+#define ns_msg_getflag __ns_msg_getflag
+#define ns_name_compress __ns_name_compress
+#define ns_name_ntol __ns_name_ntol
+#define ns_name_ntop __ns_name_ntop
+#define ns_name_pack __ns_name_pack
+#define ns_name_pton __ns_name_pton
+#define ns_name_rollback __ns_name_rollback
+#define ns_name_skip __ns_name_skip
+#define ns_name_uncompress __ns_name_uncompress
+#define ns_name_unpack __ns_name_unpack
+#define ns_parserr __ns_parserr
+#define ns_put16 __ns_put16
+#define ns_put32 __ns_put32
+#define ns_samename __ns_samename
+#define ns_skiprr __ns_skiprr
+#define ns_sprintrr __ns_sprintrr
+#define ns_sprintrrf __ns_sprintrrf
 #endif
 
-__BEGIN_DECLS
-int		ns_msg_getflag(ns_msg, int) __LIBC_ABI_PUBLIC__;
-uint16_t	ns_get16(const u_char *) __LIBC_ABI_PUBLIC__;
-uint32_t	ns_get32(const u_char *) __LIBC_ABI_PUBLIC__;
-void		ns_put16(uint16_t, u_char *) __LIBC_ABI_PUBLIC__;
-void		ns_put32(uint32_t, u_char *) __LIBC_ABI_PUBLIC__;
-int		ns_initparse(const u_char *, int, ns_msg *) __LIBC_ABI_PUBLIC__;
-int		ns_skiprr(const u_char *, const u_char *, ns_sect, int) __LIBC_ABI_PUBLIC__;
-int		ns_parserr(ns_msg *, ns_sect, int, ns_rr *) __LIBC_ABI_PUBLIC__;
-int		ns_parserr2(ns_msg *, ns_sect, int, ns_rr2 *) __LIBC_HIDDEN__;
-int		ns_sprintrr(const ns_msg *, const ns_rr *,
-				 const char *, const char *, char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_sprintrrf(const u_char *, size_t, const char *,
-				  ns_class, ns_type, u_long, const u_char *,
-				  size_t, const char *, const char *,
-				  char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_format_ttl(u_long, char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_parse_ttl(const char *, u_long *) __LIBC_ABI_PUBLIC__;
-uint32_t	ns_datetosecs(const char *cp, int *errp) __LIBC_ABI_PUBLIC__;
-int		ns_name_ntol(const u_char *, u_char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_name_ntop(const u_char *, char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_name_pton(const char *, u_char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_name_pton2(const char *, u_char *, size_t, size_t *) __LIBC_HIDDEN__;
-int		ns_name_unpack(const u_char *, const u_char *,
-				    const u_char *, u_char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_name_unpack2(const u_char *, const u_char *,
-				     const u_char *, u_char *, size_t,
-				     size_t *) __LIBC_HIDDEN__;
-int		ns_name_pack(const u_char *, u_char *, int,
-				  const u_char **, const u_char **) __LIBC_ABI_PUBLIC__;
-int		ns_name_uncompress(const u_char *, const u_char *,
-					const u_char *, char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_name_compress(const char *, u_char *, size_t,
-				      const u_char **, const u_char **) __LIBC_ABI_PUBLIC__;
-int		ns_name_skip(const u_char **, const u_char *) __LIBC_ABI_PUBLIC__;
-void		ns_name_rollback(const u_char *, const u_char **,
-				      const u_char **) __LIBC_ABI_PUBLIC__;
-int		ns_sign(u_char *, int *, int, int, void *,
-			     const u_char *, int, u_char *, int *, time_t) __LIBC_ABI_PUBLIC__;
-int		ns_sign2(u_char *, int *, int, int, void *,
-			      const u_char *, int, u_char *, int *, time_t,
-			      u_char **, u_char **) __LIBC_ABI_PUBLIC__;
-ssize_t		ns_name_length(ns_nname_ct, size_t) __LIBC_HIDDEN__;
-int		ns_name_eq(ns_nname_ct, size_t, ns_nname_ct, size_t) __LIBC_HIDDEN__;
-int		ns_name_owned(ns_namemap_ct, int, ns_namemap_ct, int) __LIBC_HIDDEN__;
-int		ns_name_map(ns_nname_ct, size_t, ns_namemap_t, int) __LIBC_HIDDEN__;
-int		ns_name_labels(ns_nname_ct, size_t) __LIBC_HIDDEN__;
-int		ns_sign_tcp(u_char *, int *, int, int,
-				 ns_tcp_tsig_state *, int) __LIBC_ABI_PUBLIC__;
-int		ns_sign_tcp2(u_char *, int *, int, int,
-				  ns_tcp_tsig_state *, int,
-				  u_char **, u_char **) __LIBC_ABI_PUBLIC__;
-int		ns_sign_tcp_init(void *, const u_char *, int,
-					ns_tcp_tsig_state *) __LIBC_ABI_PUBLIC__;
-u_char		*ns_find_tsig(u_char *, u_char *) __LIBC_ABI_PUBLIC__;
-int		ns_verify(u_char *, int *, void *,
-			       const u_char *, int, u_char *, int *,
-			       time_t *, int) __LIBC_ABI_PUBLIC__;
-int		ns_verify_tcp(u_char *, int *, ns_tcp_tsig_state *, int);
-int		ns_verify_tcp_init(void *, const u_char *, int,
-					ns_tcp_tsig_state *) __LIBC_ABI_PUBLIC__;
-int		ns_samedomain(const char *, const char *) __LIBC_ABI_PUBLIC__;
-int		ns_subdomain(const char *, const char *) __LIBC_ABI_PUBLIC__;
-int		ns_makecanon(const char *, char *, size_t) __LIBC_ABI_PUBLIC__;
-int		ns_samename(const char *, const char *) __LIBC_ABI_PUBLIC__;
+
+#if __BIONIC_AVAILABILITY_GUARD(22)
+int ns_msg_getflag(ns_msg __handle, int __flag) __INTRODUCED_IN(22);
+uint16_t ns_get16(const u_char* _Nonnull __src) __INTRODUCED_IN(22);
+uint32_t ns_get32(const u_char* _Nonnull __src) __INTRODUCED_IN(22);
+void ns_put16(uint16_t __src, u_char* _Nonnull __dst) __INTRODUCED_IN(22);
+void ns_put32(uint32_t __src, u_char* _Nonnull __dst) __INTRODUCED_IN(22);
+int ns_initparse(const u_char* _Nonnull __msg, int __msg_size, ns_msg* _Nonnull __handle) __INTRODUCED_IN(22);
+int ns_skiprr(const u_char* _Nonnull __ptr, const u_char* _Nonnull __eom, ns_sect __section, int __count) __INTRODUCED_IN(22);
+int ns_parserr(ns_msg* _Nonnull __handle, ns_sect __section, int __rr_number, ns_rr* _Nonnull __rr) __INTRODUCED_IN(22);
+int ns_sprintrr(const ns_msg* _Nonnull  __handle, const ns_rr* _Nonnull __rr, const char* _Nullable __name_ctx, const char* _Nullable __origin, char* _Nonnull __buf, size_t __buf_size) __INTRODUCED_IN(22);
+int ns_sprintrrf(const u_char* _Nonnull __msg, size_t __msg_size, const char* _Nonnull __name, ns_class __class, ns_type __type, u_long __ttl, const u_char* _Nonnull __rdata, size_t __rdata_size, const char* _Nullable __name_ctx, const char* _Nullable __origin, char* _Nonnull __buf, size_t __buf_size) __INTRODUCED_IN(22);
+int ns_format_ttl(u_long __ttl, char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_name_ntol(const u_char* _Nonnull __src, u_char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_name_ntop(const u_char* _Nonnull __src, char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_name_pton(const char* _Nonnull __src, u_char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_name_unpack(const u_char* _Nonnull __msg, const u_char* _Nonnull __eom, const u_char* _Nonnull __src, u_char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_name_pack(const u_char* _Nonnull __src, u_char* _Nonnull __dst, int __dst_size, const u_char* _Nullable * _Nullable __dn_ptrs, const u_char* _Nullable * _Nullable __last_dn_ptr) __INTRODUCED_IN(22);
+int ns_name_uncompress(const u_char* _Nonnull __msg, const u_char* _Nonnull __eom, const u_char* _Nonnull __src, char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_name_compress(const char* _Nonnull __src, u_char* _Nonnull __dst, size_t __dst_size, const u_char* _Nullable * _Nullable __dn_ptrs, const u_char* _Nullable * _Nullable __last_dn_ptr) __INTRODUCED_IN(22);
+int ns_name_skip(const u_char* _Nullable * _Nonnull __ptr_ptr, const u_char* _Nonnull __eom) __INTRODUCED_IN(22);
+void ns_name_rollback(const u_char* _Nonnull __src, const u_char* _Nullable * _Nonnull __dn_ptrs, const u_char* _Nullable * _Nonnull __last_dn_ptr) __INTRODUCED_IN(22);
+
+int ns_makecanon(const char* _Nonnull __src, char* _Nonnull __dst, size_t __dst_size) __INTRODUCED_IN(22);
+int ns_samename(const char* _Nonnull __lhs, const char* _Nonnull __rhs) __INTRODUCED_IN(22);
+#endif /* __BIONIC_AVAILABILITY_GUARD(22) */
+
+
 __END_DECLS
 
 #ifdef BIND_4_COMPAT

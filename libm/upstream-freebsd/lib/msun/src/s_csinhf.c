@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2005 Bruce D. Evans and Steven G. Kargl
  * All rights reserved.
  *
@@ -27,9 +29,6 @@
 /*
  * Float version of csinh().  See s_csinh.c for details.
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/s_csinhf.c 284426 2015-06-15 20:16:53Z tijl $");
 
 #include <complex.h>
 #include <math.h>
@@ -90,7 +89,8 @@ csinhf(float complex z)
 		return (CMPLXF(x * cosf(y), INFINITY * sinf(y)));
 	}
 
-	return (CMPLXF((x + x) * (y - y), (x * x) * (y - y)));
+	return (CMPLXF(((long double)x + x) * (y - y),
+	    ((long double)x * x) * (y - y)));
 }
 
 float complex

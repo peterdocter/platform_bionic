@@ -34,47 +34,20 @@
  *	@(#)cdefs.h	8.8 (Berkeley) 1/9/95
  */
 
-#ifndef	_SYS_CDEFS_H_
-#define	_SYS_CDEFS_H_
+#pragma once
 
-/*
- * Testing against Clang-specific extensions.
+/**
+ * `__BIONIC__` is always defined if you're building with bionic. See
+ * https://android.googlesource.com/platform/bionic/+/main/docs/defines.md.
  */
+#define __BIONIC__ 1
 
-#ifndef __has_extension
-#define __has_extension         __has_feature
-#endif
-#ifndef __has_feature
-#define __has_feature(x)        0
-#endif
-#ifndef __has_include
-#define __has_include(x)        0
-#endif
-#ifndef __has_builtin
-#define __has_builtin(x)        0
-#endif
-#ifndef __has_attribute
-#define __has_attribute(x)      0
-#endif
-
-
-/*
- * Macro to test if we're using a GNU C compiler of a specific vintage
- * or later, for e.g. features that appeared in a particular version
- * of GNU C.  Usage:
- *
- *	#if __GNUC_PREREQ(major, minor)
- *	...cool feature...
- *	#else
- *	...delete feature...
- *	#endif
- */
-#ifdef __GNUC__
-#define	__GNUC_PREREQ(x, y)						\
-	((__GNUC__ == (x) && __GNUC_MINOR__ >= (y)) ||			\
-	 (__GNUC__ > (x)))
+#if defined(__cplusplus)
+#define __BEGIN_DECLS extern "C" {
+#define __END_DECLS }
 #else
-#define	__GNUC_PREREQ(x, y)	0
+#define __BEGIN_DECLS
+#define __END_DECLS
 #endif
 
 #define __strong_alias(alias, sym) \
@@ -82,14 +55,20 @@
             #alias " = " #sym);
 
 #if defined(__cplusplus)
-#define	__BEGIN_DECLS		extern "C" {
-#define	__END_DECLS		}
-#define	__static_cast(x,y)	static_cast<x>(y)
+#define __BIONIC_CAST(_k,_t,_v) (_k<_t>(_v))
 #else
-#define	__BEGIN_DECLS
-#define	__END_DECLS
-#define	__static_cast(x,y)	(x)y
+#define __BIONIC_CAST(_k,_t,_v) ((_t) (_v))
 #endif
+
+#define __BIONIC_ALIGN(__value, __alignment) (((__value) + (__alignment)-1) & ~((__alignment)-1))
+
+/*
+ * The nullness constraints of this parameter or return value are
+ * quite complex. This is used to highlight spots where developers
+ * are encouraged to read relevant manuals or code to understand
+ * the full picture of nullness for this pointer.
+ */
+#define __BIONIC_COMPLICATED_NULLNESS _Null_unspecified
 
 /*
  * The __CONCAT macro is used to concatenate parts of symbol names, e.g.
@@ -99,85 +78,39 @@
  * strings produced by the __STRING macro, but this only works with ANSI C.
  */
 
-#define	___STRING(x)	__STRING(x)
+#define	__P(protos)	protos		/* full-blown ANSI C */
+
+#define	__CONCAT1(x,y)	x ## y
+#define	__CONCAT(x,y)	__CONCAT1(x,y)
 #define	___CONCAT(x,y)	__CONCAT(x,y)
 
-#if defined(__STDC__) || defined(__cplusplus)
-#define	__P(protos)	protos		/* full-blown ANSI C */
-#define	__CONCAT(x,y)	x ## y
 #define	__STRING(x)	#x
+#define	___STRING(x)	__STRING(x)
 
-#define	__const		const		/* define reserved names to standard */
-#define	__signed	signed
-#define	__volatile	volatile
-#if defined(__cplusplus)
-#define	__inline	inline		/* convert to C++ keyword */
-#else
-#if !defined(__GNUC__) && !defined(__lint__)
-#define	__inline			/* delete GCC keyword */
-#endif /* !__GNUC__  && !__lint__ */
-#endif /* !__cplusplus */
+// C++ has `inline` as a keyword, as does C99, but ANSI C (aka C89 aka C90)
+// does not. Everything accepts the `__inline__` extension though. We could
+// just use that directly in our own code, but there's historical precedent
+// for `__inline` meaning it's still used in upstream BSD code (and potentially
+// downstream in vendor or app code).
+#define	__inline __inline__
 
-#else	/* !(__STDC__ || __cplusplus) */
-#define	__P(protos)	()		/* traditional C preprocessor */
-#define	__CONCAT(x,y)	x/**/y
-#define	__STRING(x)	"x"
-
-#ifndef __GNUC__
-#define	__const				/* delete pseudo-ANSI C keywords */
-#define	__inline
-#define	__signed
-#define	__volatile
-#endif	/* !__GNUC__ */
-
-#endif	/* !(__STDC__ || __cplusplus) */
-
-/*
- * The following macro is used to remove const cast-away warnings
- * from gcc -Wcast-qual; it should be used with caution because it
- * can hide valid errors; in particular most valid uses are in
- * situations where the API requires it, not to cast away string
- * constants. We don't use *intptr_t on purpose here and we are
- * explicit about unsigned long so that we don't have additional
- * dependencies.
- */
-#define __UNCONST(a)	((void *)(unsigned long)(const void *)(a))
-
+#define __always_inline __attribute__((__always_inline__))
+#define __attribute_const__ __attribute__((__const__))
+#define __attribute_pure__ __attribute__((__pure__))
 #define __dead __attribute__((__noreturn__))
-#define __pure __attribute__((__const__))
-#define __pure2 __attribute__((__const__)) /* Android-added: used by FreeBSD libm */
+#define __noreturn __attribute__((__noreturn__))
+#define __mallocfunc  __attribute__((__malloc__))
+#define __packed __attribute__((__packed__))
+#define __returns_twice __attribute__((__returns_twice__))
+#define __unused __attribute__((__unused__))
+#define __used __attribute__((__used__))
 
-#define	__unused	__attribute__((__unused__))
-
-#define	__used		__attribute__((__used__))
-
-#define	__packed	__attribute__((__packed__))
-#define	__aligned(x)	__attribute__((__aligned__(x)))
-#define	__section(x)	__attribute__((__section__(x)))
-
-#define __statement(x)	__extension__(x)
-
-#define __nonnull(args) __attribute__((__nonnull__ args))
-
-#define __printflike(x, y) __attribute__((__format__(printf, x, y))) __nonnull((x))
-#define __scanflike(x, y) __attribute__((__format__(scanf, x, y))) __nonnull((x))
+#define __printflike(x, y) __attribute__((__format__(printf, x, y)))
+#define __scanflike(x, y) __attribute__((__format__(scanf, x, y)))
+#define __strftimelike(x) __attribute__((__format__(strftime, x, 0)))
 
 /*
- * C99 defines the restrict type qualifier keyword.
- */
-#if defined(__STDC__VERSION__) && __STDC_VERSION__ >= 199901L
-#define	__restrict	restrict
-#endif
-
-/*
- * C99 defines __func__ predefined identifier.
- */
-#if !defined(__STDC_VERSION__) || !(__STDC_VERSION__ >= 199901L)
-#define	__func__	__PRETTY_FUNCTION__
-#endif /* !(__STDC_VERSION__ >= 199901L) */
-
-/*
- * GNU C version 2.96 adds explicit branch prediction so that
+ * GNU C version 2.96 added explicit branch prediction so that
  * the CPU back-end can hint the processor and also so that
  * code blocks can be reordered such that the predicted path
  * sees a more linear flow, thus improving cache behavior, etc.
@@ -207,18 +140,25 @@
 #define	__predict_true(exp)	__builtin_expect((exp) != 0, 1)
 #define	__predict_false(exp)	__builtin_expect((exp) != 0, 0)
 
-#define __noreturn    __attribute__((__noreturn__))
-#define __mallocfunc  __attribute__((malloc))
-#define __purefunc    __attribute__((pure))
+#define __nodiscard __attribute__((__warn_unused_result__))
+#define __wur __nodiscard
 
-#define __always_inline __attribute__((__always_inline__))
+#define __errorattr(msg) __attribute__((__unavailable__(msg)))
+#define __warnattr(msg) __attribute__((__deprecated__(msg)))
+#define __warnattr_real(msg) __attribute__((__deprecated__(msg)))
+#define __enable_if(cond, msg) __attribute__((__enable_if__(cond, msg)))
+#define __clang_error_if(cond, msg) __attribute__((__diagnose_if__(cond, msg, "error")))
+#define __clang_warning_if(cond, msg) __attribute__((__diagnose_if__(cond, msg, "warning")))
 
-#define __wur __attribute__((__warn_unused_result__))
-
-#define __errorattr(msg) __attribute__((__error__(msg)))
-#define __warnattr(msg) __attribute__((__warning__(msg)))
-
-#define __errordecl(name, msg) extern void name(void) __errorattr(msg)
+#if defined(ANDROID_STRICT)
+/*
+ * For things that are sketchy, but not necessarily an error. FIXME: Enable
+ * this.
+ */
+#  define __warnattr_strict(msg) /* __warnattr(msg) */
+#else
+#  define __warnattr_strict(msg)
+#endif
 
 /*
  * Some BSD source needs these macros.
@@ -232,176 +172,41 @@
 #define __SCCSID(_s) /* nothing */
 
 /*
- * _BSD_SOURCE and _GNU_SOURCE are expected to be defined by callers before
- * any standard header file is included. In those header files we test
- * against __USE_BSD and __USE_GNU. glibc does this in <features.h> but we
- * do it in <sys/cdefs.h> instead because that's where our existing
- * _POSIX_C_SOURCE tests were, and we're already confident that <sys/cdefs.h>
- * is included everywhere it should be.
+ * With bionic, you always get all C and POSIX API.
  *
- * The _GNU_SOURCE test needs to come before any _BSD_SOURCE or _POSIX* tests
- * because _GNU_SOURCE implies everything else.
+ * If you want BSD and/or GNU extensions, _BSD_SOURCE and/or _GNU_SOURCE are
+ * expected to be defined by callers before *any* standard header file is
+ * included.
+ *
+ * In our header files we test against __USE_BSD and __USE_GNU.
  */
 #if defined(_GNU_SOURCE)
-# define __USE_GNU 1
-# undef _POSIX_SOURCE
-# define _POSIX_SOURCE 1
-# undef _POSIX_C_SOURCE
-# define _POSIX_C_SOURCE 200809L
-# undef _BSD_SOURCE
-# define _BSD_SOURCE 1
+#  define __USE_BSD 1
+#  define __USE_GNU 1
 #endif
 
 #if defined(_BSD_SOURCE)
-# define __USE_BSD 1
+#  define __USE_BSD 1
 #endif
 
 /*
  * _FILE_OFFSET_BITS 64 support.
+ * See https://android.googlesource.com/platform/bionic/+/main/docs/32-bit-abi.md
  */
-#if !defined(__LP64__) && defined(_FILE_OFFSET_BITS)
-#if _FILE_OFFSET_BITS == 64
-#define __USE_FILE_OFFSET64 1
-#endif
-#endif
-
-/*-
- * POSIX.1 requires that the macros we test be defined before any standard
- * header file is included.
- *
- * Here's a quick run-down of the versions:
- *  defined(_POSIX_SOURCE)		1003.1-1988
- *  _POSIX_C_SOURCE == 1		1003.1-1990
- *  _POSIX_C_SOURCE == 2		1003.2-1992 C Language Binding Option
- *  _POSIX_C_SOURCE == 199309		1003.1b-1993
- *  _POSIX_C_SOURCE == 199506		1003.1c-1995, 1003.1i-1995,
- *					and the omnibus ISO/IEC 9945-1: 1996
- *  _POSIX_C_SOURCE == 200112		1003.1-2001
- *  _POSIX_C_SOURCE == 200809		1003.1-2008
- *
- * In addition, the X/Open Portability Guide, which is now the Single UNIX
- * Specification, defines a feature-test macro which indicates the version of
- * that specification, and which subsumes _POSIX_C_SOURCE.
- *
- * Our macros begin with two underscores to avoid namespace screwage.
- */
-
-/* Deal with IEEE Std. 1003.1-1990, in which _POSIX_C_SOURCE == 1. */
-#if defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE == 1
-#undef _POSIX_C_SOURCE		/* Probably illegal, but beyond caring now. */
-#define	_POSIX_C_SOURCE		199009
-#endif
-
-/* Deal with IEEE Std. 1003.2-1992, in which _POSIX_C_SOURCE == 2. */
-#if defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE == 2
-#undef _POSIX_C_SOURCE
-#define	_POSIX_C_SOURCE		199209
-#endif
-
-/* Deal with various X/Open Portability Guides and Single UNIX Spec. */
-#ifdef _XOPEN_SOURCE
-#if _XOPEN_SOURCE - 0 >= 700
-#define	__XSI_VISIBLE		700
-#undef _POSIX_C_SOURCE
-#define	_POSIX_C_SOURCE		200809
-#elif _XOPEN_SOURCE - 0 >= 600
-#define	__XSI_VISIBLE		600
-#undef _POSIX_C_SOURCE
-#define	_POSIX_C_SOURCE		200112
-#elif _XOPEN_SOURCE - 0 >= 500
-#define	__XSI_VISIBLE		500
-#undef _POSIX_C_SOURCE
-#define	_POSIX_C_SOURCE		199506
-#endif
-#endif
-
+#if !defined(__LP64__) && defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS == 64
+#  define __USE_FILE_OFFSET64 1
 /*
- * Deal with all versions of POSIX.  The ordering relative to the tests above is
- * important.
+ * Note that __RENAME_IF_FILE_OFFSET64 is only valid if the off_t and off64_t
+ * functions were both added at the same API level because if you use this,
+ * you only have one declaration to attach __INTRODUCED_IN to.
  */
-#if defined(_POSIX_SOURCE) && !defined(_POSIX_C_SOURCE)
-#define	_POSIX_C_SOURCE		198808
-#endif
-#ifdef _POSIX_C_SOURCE
-#if _POSIX_C_SOURCE >= 200809
-#define	__POSIX_VISIBLE		200809
-#define	__ISO_C_VISIBLE		1999
-#elif _POSIX_C_SOURCE >= 200112
-#define	__POSIX_VISIBLE		200112
-#define	__ISO_C_VISIBLE		1999
-#elif _POSIX_C_SOURCE >= 199506
-#define	__POSIX_VISIBLE		199506
-#define	__ISO_C_VISIBLE		1990
-#elif _POSIX_C_SOURCE >= 199309
-#define	__POSIX_VISIBLE		199309
-#define	__ISO_C_VISIBLE		1990
-#elif _POSIX_C_SOURCE >= 199209
-#define	__POSIX_VISIBLE		199209
-#define	__ISO_C_VISIBLE		1990
-#elif _POSIX_C_SOURCE >= 199009
-#define	__POSIX_VISIBLE		199009
-#define	__ISO_C_VISIBLE		1990
+#  define __RENAME_IF_FILE_OFFSET64(func) __RENAME(func)
 #else
-#define	__POSIX_VISIBLE		198808
-#define	__ISO_C_VISIBLE		0
-#endif /* _POSIX_C_SOURCE */
-#else
-/*-
- * Deal with _ANSI_SOURCE:
- * If it is defined, and no other compilation environment is explicitly
- * requested, then define our internal feature-test macros to zero.  This
- * makes no difference to the preprocessor (undefined symbols in preprocessing
- * expressions are defined to have value zero), but makes it more convenient for
- * a test program to print out the values.
- *
- * If a program mistakenly defines _ANSI_SOURCE and some other macro such as
- * _POSIX_C_SOURCE, we will assume that it wants the broader compilation
- * environment (and in fact we will never get here).
- */
-#if defined(_ANSI_SOURCE)	/* Hide almost everything. */
-#define	__POSIX_VISIBLE		0
-#define	__XSI_VISIBLE		0
-#define	__BSD_VISIBLE		0
-#define	__ISO_C_VISIBLE		1990
-#elif defined(_C99_SOURCE)	/* Localism to specify strict C99 env. */
-#define	__POSIX_VISIBLE		0
-#define	__XSI_VISIBLE		0
-#define	__BSD_VISIBLE		0
-#define	__ISO_C_VISIBLE		1999
-#else				/* Default environment: show everything. */
-#define	__POSIX_VISIBLE		200809
-#define	__XSI_VISIBLE		700
-#define	__BSD_VISIBLE		1
-#define	__ISO_C_VISIBLE		1999
+#  define __RENAME_IF_FILE_OFFSET64(func)
 #endif
-#endif
-
-/*
- * Default values.
- */
-#ifndef __XPG_VISIBLE
-# define __XPG_VISIBLE          700
-#endif
-#ifndef __POSIX_VISIBLE
-# define __POSIX_VISIBLE        200809
-#endif
-#ifndef __ISO_C_VISIBLE
-# define __ISO_C_VISIBLE        1999
-#endif
-#ifndef __BSD_VISIBLE
-# define __BSD_VISIBLE          1
-#endif
-
-#define  __BIONIC__   1
-#include <android/api-level.h>
 
 /* glibc compatibility. */
-#if __POSIX_VISIBLE >= 200809
-#define __USE_ISOC99 1
-#define __USE_XOPEN2K 1
-#define __USE_XOPEN2K8 1
-#endif
-#if __LP64__
+#if defined(__LP64__)
 #define __WORDSIZE 64
 #else
 #define __WORDSIZE 32
@@ -412,62 +217,124 @@
  * added to commonly used libc functions. If a buffer overrun is
  * detected, the program is safely aborted.
  *
- * See
- * http://gcc.gnu.org/onlinedocs/gcc/Object-Size-Checking.html for details.
+ * https://android-developers.googleblog.com/2017/04/fortify-in-android.html
  */
-#if defined(_FORTIFY_SOURCE) && _FORTIFY_SOURCE > 0 && defined(__OPTIMIZE__) && __OPTIMIZE__ > 0
-#  define __BIONIC_FORTIFY 1
-#  if _FORTIFY_SOURCE == 2
-#    define __bos(s) __builtin_object_size((s), 1)
-#  else
-#    define __bos(s) __builtin_object_size((s), 0)
-#  endif
-#  define __bos0(s) __builtin_object_size((s), 0)
-#  define __BIONIC_FORTIFY_INLINE extern __inline__ __always_inline __attribute__((gnu_inline)) __attribute__((__artificial__))
-#endif
+
 #define __BIONIC_FORTIFY_UNKNOWN_SIZE ((size_t) -1)
 
-/* Used to tag non-static symbols that are private and never exposed by the shared library. */
-#define __LIBC_HIDDEN__ __attribute__((visibility("hidden")))
-
-/* Like __LIBC_HIDDEN__, but preserves binary compatibility for LP32. */
-#ifdef __LP64__
-#define __LIBC64_HIDDEN__ __LIBC_HIDDEN__
-#else
-#define __LIBC64_HIDDEN__ __LIBC_ABI_PUBLIC__
+#if defined(_FORTIFY_SOURCE) && _FORTIFY_SOURCE > 0
+/* FORTIFY can interfere with pattern-matching of clang-tidy/the static analyzer.  */
+#  if !defined(__clang_analyzer__)
+#    define __BIONIC_FORTIFY 1
+/* ASAN has interceptors that FORTIFY's _chk functions can break.  */
+#    if __has_feature(address_sanitizer)
+#      define __BIONIC_FORTIFY_RUNTIME_CHECKS_ENABLED 0
+#    else
+#      define __BIONIC_FORTIFY_RUNTIME_CHECKS_ENABLED 1
+#    endif
+#  endif
 #endif
 
-/* Used to tag non-static symbols that are public and exposed by the shared library. */
-#define __LIBC_ABI_PUBLIC__ __attribute__((visibility ("default")))
+// As we move some FORTIFY checks to be always on, __bos needs to be
+// always available.
+#if defined(__BIONIC_FORTIFY)
+#  if _FORTIFY_SOURCE > 1
+#    define __bos_level 1
+#  else
+#    define __bos_level 0
+#  endif
+#else
+#  define __bos_level 0
+#endif
+
+#define __bosn(s, n) __builtin_object_size((s), (n))
+#define __bos(s) __bosn((s), __bos_level)
+
+#if defined(__BIONIC_FORTIFY)
+#  define __bos0(s) __bosn((s), 0)
+#  define __pass_object_size_n(n) __attribute__((__pass_object_size__(n)))
+/*
+ * FORTIFY'ed functions all have either enable_if or pass_object_size, which
+ * makes taking their address impossible. Saying (&read)(foo, bar, baz); will
+ * therefore call the unFORTIFYed version of read.
+ */
+#  define __call_bypassing_fortify(fn) (&fn)
+/*
+ * Because clang-FORTIFY uses overloads, we can't mark functions as `extern inline` without making
+ * them available externally. FORTIFY'ed functions try to be as close to possible as 'invisible';
+ * having stack protectors detracts from that (b/182948263).
+ */
+#  define __BIONIC_FORTIFY_INLINE static __inline __attribute__((__no_stack_protector__)) \
+      __always_inline
+/*
+ * We should use __BIONIC_FORTIFY_VARIADIC instead of __BIONIC_FORTIFY_INLINE
+ * for variadic functions because compilers cannot inline them.
+ * The __always_inline attribute is useless, misleading, and could trigger
+ * clang compiler bug to incorrectly inline variadic functions.
+ */
+#  define __BIONIC_FORTIFY_VARIADIC static __inline
+/* Error functions don't have bodies, so they can just be static. */
+#  define __BIONIC_ERROR_FUNCTION_VISIBILITY static __unused
+#else
+/* Further increase sharing for some inline functions */
+#  define __pass_object_size_n(n)
+#endif
+#define __pass_object_size __pass_object_size_n(__bos_level)
+#define __pass_object_size0 __pass_object_size_n(0)
+
+/* Intended for use in unevaluated contexts, e.g. diagnose_if conditions. */
+#define __bos_unevaluated_lt(bos_val, val) \
+  ((bos_val) != __BIONIC_FORTIFY_UNKNOWN_SIZE && (bos_val) < (val))
+
+#define __bos_unevaluated_le(bos_val, val) \
+  ((bos_val) != __BIONIC_FORTIFY_UNKNOWN_SIZE && (bos_val) <= (val))
+
+/* Intended for use in evaluated contexts. */
+#define __bos_dynamic_check_impl_and(bos_val, op, index, cond) \
+  ((bos_val) == __BIONIC_FORTIFY_UNKNOWN_SIZE ||                 \
+   (__builtin_constant_p(index) && bos_val op index && (cond)))
+
+#define __bos_dynamic_check_impl(bos_val, op, index) \
+  __bos_dynamic_check_impl_and(bos_val, op, index, 1)
+
+#define __bos_trivially_ge(bos_val, index) __bos_dynamic_check_impl((bos_val), >=, (index))
+#define __bos_trivially_gt(bos_val, index) __bos_dynamic_check_impl((bos_val), >, (index))
+
+#if defined(__BIONIC_FORTIFY) || defined(__BIONIC_DECLARE_FORTIFY_HELPERS)
+#  define __BIONIC_INCLUDE_FORTIFY_HEADERS 1
+#endif
+
+#define __overloadable __attribute__((__overloadable__))
+
+#define __diagnose_as_builtin(...) __attribute__((__diagnose_as_builtin__(__VA_ARGS__)))
+
+/* Used to tag non-static symbols that are private and never exposed by the shared library. */
+#define __LIBC_HIDDEN__ __attribute__((__visibility__("hidden")))
+
+/*
+ * Used to tag symbols that should be hidden for 64-bit,
+ * but visible to preserve binary compatibility for LP32.
+ */
+#ifdef __LP64__
+#define __LIBC32_LEGACY_PUBLIC__ __attribute__((__visibility__("hidden")))
+#else
+#define __LIBC32_LEGACY_PUBLIC__ __attribute__((__visibility__("default")))
+#endif
 
 /* Used to rename functions so that the compiler emits a call to 'x' rather than the function this was applied to. */
 #define __RENAME(x) __asm__(#x)
 
-#ifdef __clang__
-#define __AVAILABILITY(...) __attribute__((availability(android,__VA_ARGS__)))
-#define __INTRODUCED_IN(api_level) __AVAILABILITY(introduced=api_level)
-#define __DEPRECATED_IN(api_level) __AVAILABILITY(deprecated=api_level)
-#define __REMOVED_IN(api_level) __AVAILABILITY(obsoleted=api_level)
-#else
-#define __AVAILABILITY(...)
-#define __INTRODUCED_IN(api_level)
-#define __DEPRECATED_IN(api_level)
-#define __REMOVED_IN(api_level)
-#endif // __clang__
+/*
+ * Used when we need to check for overflow when multiplying x and y. This
+ * should only be used where __builtin_umull_overflow can not work, because it makes
+ * assumptions that __builtin_umull_overflow doesn't (x and y are positive, ...),
+ * *and* doesn't make use of compiler intrinsics, so it's probably slower than
+ * __builtin_umull_overflow.
+ */
+#define __unsafe_check_mul_overflow(x, y) ((__SIZE_TYPE__)-1 / (x) < (y))
 
-#if __has_builtin(__builtin_umul_overflow) || __GNUC__ >= 5
-#if __LP64__
-#define __size_mul_overflow(a, b, result) __builtin_umull_overflow(a, b, result)
-#else
-#define __size_mul_overflow(a, b, result) __builtin_umul_overflow(a, b, result)
+#include <android/versioning.h>
+#include <android/api-level.h>
+#if __has_include(<android/ndk-version.h>)
+#include <android/ndk-version.h>
 #endif
-#else
-static __inline__ __always_inline int __size_mul_overflow(__SIZE_TYPE__ a, __SIZE_TYPE__ b,
-                                                          __SIZE_TYPE__ *result) {
-    *result = a * b;
-    static const __SIZE_TYPE__ mul_no_overflow = 1UL << (sizeof(__SIZE_TYPE__) * 4);
-    return (a >= mul_no_overflow || b >= mul_no_overflow) && a > 0 && (__SIZE_TYPE__)-1 / a < b;
-}
-#endif
-
-#endif /* !_SYS_CDEFS_H_ */

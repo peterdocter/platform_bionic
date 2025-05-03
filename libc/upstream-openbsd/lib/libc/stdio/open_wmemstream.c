@@ -1,4 +1,4 @@
-/*	$OpenBSD: open_wmemstream.c,v 1.4 2014/10/08 05:28:19 deraadt Exp $	*/
+/*	$OpenBSD: open_wmemstream.c,v 1.10 2023/07/11 12:14:16 claudio Exp $	*/
 
 /*
  * Copyright (c) 2011 Martin Pieuchot <mpi@openbsd.org>
@@ -16,16 +16,16 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
-
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 #include "local.h"
+
+#define	MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 struct state {
 	wchar_t		 *string;	/* actual stream */
@@ -52,10 +52,9 @@ wmemstream_write(void *v, const char *b, int l)
 
 		if (sz < end + 1)
 			sz = end + 1;
-		p = reallocarray(st->string, sz, sizeof(wchar_t));
+		p = recallocarray(st->string, st->size, sz, sizeof(wchar_t));
 		if (!p)
 			return (-1);
-		bzero(p + st->size, (sz - st->size) * sizeof(wchar_t));
 		*st->pbuf = st->string = p;
 		st->size = sz;
 	}
@@ -105,7 +104,7 @@ wmemstream_seek(void *v, fpos_t off, int whence)
 	bzero(&st->mbs, sizeof(st->mbs));
 
 	st->pos = base + off;
-	*st->psize = MIN(st->pos, st->len);
+	*st->psize = MINIMUM(st->pos, st->len);
 
 	return (st->pos);
 }
@@ -146,7 +145,6 @@ open_wmemstream(wchar_t **pbuf, size_t *psize)
 		return (NULL);
 	}
 
-	*st->string = L'\0';
 	st->pos = 0;
 	st->len = 0;
 	st->pbuf = pbuf;

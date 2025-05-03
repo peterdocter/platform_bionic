@@ -26,17 +26,35 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _SYS_SIGNALFD_H_
-#define _SYS_SIGNALFD_H_
+#pragma once
+
+/**
+ * @file sys/signalfd.h
+ * @brief File-descriptor based signal interface.
+ */
+
+#include <sys/cdefs.h>
 
 #include <linux/signalfd.h>
 #include <signal.h>
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 
-extern int signalfd(int fd, const sigset_t* mask, int flags) __nonnull((2));
+/**
+ * [signalfd(2)](https://man7.org/linux/man-pages/man2/signalfd.2.html) creates/manipulates a
+ * file descriptor for reading signal events.
+ *
+ * Returns the file descriptor on success, and returns -1 and sets `errno` on failure.
+ */
+int signalfd(int __fd, const sigset_t* _Nonnull __mask, int __flags);
+
+/**
+ * Like signalfd() but allows setting a signal mask with RT signals even from a 32-bit process.
+ */
+
+#if __BIONIC_AVAILABILITY_GUARD(28)
+int signalfd64(int __fd, const sigset64_t* _Nonnull __mask, int __flags) __INTRODUCED_IN(28);
+#endif /* __BIONIC_AVAILABILITY_GUARD(28) */
+
 
 __END_DECLS
-
-#endif /* _SYS_SIGNALFD_H */

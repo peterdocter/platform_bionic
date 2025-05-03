@@ -27,26 +27,25 @@
  */
 
 #include <stdio_ext.h>
+
+#include <errno.h>
 #include <stdlib.h>
 
+#include <async_safe/log.h>
+
 #include "local.h"
-#include "private/libc_logging.h"
 
 size_t __fbufsize(FILE* fp) {
   return fp->_bf._size;
 }
 
-/* For a _SRW stream, we don't know whether we last read or wrote.
 int __freading(FILE* fp) {
-  return (fp->_flags & _SRD) != 0 || ...;
+  return (fp->_flags & __SRD) != 0;
 }
-*/
 
-/* For a _SRW stream, we don't know whether we last read or wrote.
-int __fwriting(FILE*) {
-  return (fp->_flags & _SWR) != 0 || ...;
+int __fwriting(FILE* fp) {
+  return (fp->_flags & __SWR) != 0;
 }
-*/
 
 int __freadable(FILE* fp) {
   return (fp->_flags & (__SRD|__SRW)) != 0;
@@ -60,42 +59,36 @@ int __flbf(FILE* fp) {
   return (fp->_flags & __SLBF) != 0;
 }
 
-void __fpurge(FILE* fp) {
-  fpurge(fp);
-}
-
 size_t __fpending(FILE* fp) {
   return fp->_p - fp->_bf._base;
 }
 
+size_t __freadahead(FILE* fp) {
+  // Normally _r is the amount of input already available.
+  // When there's ungetc() data, _r counts that and _ur is the previous _r.
+  return fp->_r + (HASUB(fp) ? fp->_ur : 0);
+}
+
 void _flushlbf() {
   // If we flush all streams, we know we've flushed all the line-buffered streams.
-  fflush(NULL);
+  fflush(nullptr);
+}
+
+void __fseterr(FILE* fp) {
+  fp->_flags |= __SERR;
 }
 
 int __fsetlocking(FILE* fp, int type) {
-  int old_state = _EXT(fp)->_stdio_handles_locking ? FSETLOCKING_INTERNAL : FSETLOCKING_BYCALLER;
+  int old_state = _EXT(fp)->_caller_handles_locking ? FSETLOCKING_BYCALLER : FSETLOCKING_INTERNAL;
   if (type == FSETLOCKING_QUERY) {
     return old_state;
   }
 
   if (type != FSETLOCKING_INTERNAL && type != FSETLOCKING_BYCALLER) {
     // The API doesn't let us report an error, so blow up.
-    __libc_fatal("Bad type (%d) passed to __fsetlocking", type);
+    async_safe_fatal("Bad type (%d) passed to __fsetlocking", type);
   }
 
-  _EXT(fp)->_stdio_handles_locking = (type == FSETLOCKING_INTERNAL);
+  _EXT(fp)->_caller_handles_locking = (type == FSETLOCKING_BYCALLER);
   return old_state;
-}
-
-void clearerr_unlocked(FILE* fp) {
-  return __sclearerr(fp);
-}
-
-int feof_unlocked(FILE* fp) {
-  return __sfeof(fp);
-}
-
-int ferror_unlocked(FILE* fp) {
-  return __sferror(fp);
 }

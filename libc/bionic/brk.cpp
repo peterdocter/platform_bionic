@@ -29,11 +29,13 @@
 #include <errno.h>
 #include <unistd.h>
 
-#if __LP64__
+#if defined(__LP64__)
 static void* __bionic_brk;
 #else
 void* __bionic_brk; // Accidentally exported by the NDK.
 #endif
+
+extern "C" void* __brk(void* __addr);
 
 int brk(void* end_data) {
   __bionic_brk = __brk(end_data);
@@ -46,8 +48,8 @@ int brk(void* end_data) {
 
 void* sbrk(ptrdiff_t increment) {
   // Initialize __bionic_brk if necessary.
-  if (__bionic_brk == NULL) {
-    __bionic_brk = __brk(NULL);
+  if (__bionic_brk == nullptr) {
+    __bionic_brk = __brk(nullptr);
   }
 
   // Don't ask the kernel if we already know the answer.

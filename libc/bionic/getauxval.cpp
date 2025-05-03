@@ -26,21 +26,33 @@
  * SUCH DAMAGE.
  */
 
-#include <stddef.h>
-#include <sys/cdefs.h>
-#include <sys/auxv.h>
-#include <private/bionic_auxv.h>
 #include <elf.h>
 #include <errno.h>
+#include <private/bionic_auxv.h>
+#include <private/bionic_globals.h>
+#include <stddef.h>
+#include <sys/auxv.h>
 
-__LIBC_HIDDEN__ ElfW(auxv_t)* __libc_auxv = NULL;
-
-extern "C" unsigned long int getauxval(unsigned long int type) {
-  for (ElfW(auxv_t)* v = __libc_auxv; v->a_type != AT_NULL; ++v) {
+// This function needs to be safe to call before TLS is set up, so it can't
+// access errno or the stack protector.
+// Cannot use HWASan, as this is called during setup of the HWASan runtime to
+// determine the page size.
+__LIBC_HIDDEN__ unsigned long __bionic_getauxval(unsigned long type, bool* exists) __attribute__((no_sanitize("hwaddress"))) {
+  for (ElfW(auxv_t)* v = __libc_shared_globals()->auxv; v->a_type != AT_NULL; ++v) {
     if (v->a_type == type) {
+      *exists = true;
       return v->a_un.a_val;
     }
   }
-  errno = ENOENT;
+  *exists = false;
   return 0;
+}
+
+// Cannot use HWASan, as this is called during setup of the HWASan runtime to
+// determine the page size.
+extern "C" unsigned long getauxval(unsigned long type) __attribute__((no_sanitize("hwaddress"))) {
+  bool exists;
+  unsigned long result = __bionic_getauxval(type, &exists);
+  if (!exists) errno = ENOENT;
+  return result;
 }

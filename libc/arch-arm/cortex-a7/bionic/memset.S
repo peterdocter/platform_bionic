@@ -26,9 +26,7 @@
  * SUCH DAMAGE.
  */
 
-#include <machine/cpu-features.h>
 #include <private/bionic_asm.h>
-#include <private/libc_events.h>
 
         /*
          * Optimized memset() for ARM.
@@ -39,34 +37,23 @@
         .fpu        neon
         .syntax     unified
 
-ENTRY(__memset_chk)
+        // To avoid warning about deprecated instructions, add an explicit
+        // arch. The code generated is exactly the same.
+        .arch armv7-a
+
+ENTRY(__memset_chk_a7)
         cmp         r2, r3
-        bls         .L_done
+        bls         memset
 
         // Preserve lr for backtrace.
         push        {lr}
         .cfi_def_cfa_offset 4
         .cfi_rel_offset lr, 0
 
-        ldr         r0, error_message
-        ldr         r1, error_code
-1:
-        add         r0, pc
-        bl          __fortify_chk_fail
-error_code:
-        .word       BIONIC_EVENT_MEMSET_BUFFER_OVERFLOW
-error_message:
-        .word       error_string-(1b+8)
-END(__memset_chk)
+        bl          __memset_chk_fail
+END(__memset_chk_a7)
 
-ENTRY(bzero)
-        mov         r2, r1
-        mov         r1, #0
-.L_done:
-        // Fall through to memset...
-END(bzero)
-
-ENTRY(memset)
+ENTRY(memset_a7)
         mov         r3, r0
         // At this point only d0, d1 are going to be used below.
         vdup.8      q0, r1
@@ -173,8 +160,4 @@ ENTRY(memset)
         strbcs      r1, [r3], #1
         strbcs      r1, [r3], #1
         bx          lr
-END(memset)
-
-        .data
-error_string:
-        .string     "memset: prevented write past end of buffer"
+END(memset_a7)

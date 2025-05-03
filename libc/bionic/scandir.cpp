@@ -16,24 +16,25 @@
 
 #include <dirent.h>
 
+#include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "private/bionic_macros.h"
+#include "platform/bionic/macros.h"
 #include "private/ScopedReaddir.h"
 
 // A smart pointer to the scandir dirent**.
 class ScandirResult {
  public:
-  ScandirResult() : names_(NULL), size_(0), capacity_(0) {
+  ScandirResult() : names_(nullptr), size_(0), capacity_(0) {
   }
 
   ~ScandirResult() {
-    while (size_ > 0) {
-      free(names_[--size_]);
-    }
-    free(names_);
+    // We always call release(), so this can't happen.
+    if (names_ != nullptr) __assert(__FILE__, __LINE__, "missing call to release()");
   }
 
   size_t size() {
@@ -42,7 +43,7 @@ class ScandirResult {
 
   dirent** release() {
     dirent** result = names_;
-    names_ = NULL;
+    names_ = nullptr;
     size_ = capacity_ = 0;
     return result;
   }
@@ -52,7 +53,7 @@ class ScandirResult {
       size_t new_capacity = capacity_ + 32;
       dirent** new_names =
           reinterpret_cast<dirent**>(realloc(names_, new_capacity * sizeof(dirent*)));
-      if (new_names == NULL) {
+      if (new_names == nullptr) {
         return false;
       }
       names_ = new_names;
@@ -60,7 +61,7 @@ class ScandirResult {
     }
 
     dirent* copy = CopyDirent(entry);
-    if (copy == NULL) {
+    if (copy == nullptr) {
       return false;
     }
     names_[size_++] = copy;
@@ -68,11 +69,8 @@ class ScandirResult {
   }
 
   void Sort(int (*comparator)(const dirent**, const dirent**)) {
-    // If we have entries and a comparator, sort them.
-    if (size_ > 0 && comparator != NULL) {
-      qsort(names_, size_, sizeof(dirent*),
-            reinterpret_cast<int (*)(const void*, const void*)>(comparator));
-    }
+    qsort(names_, size_, sizeof(dirent*),
+          reinterpret_cast<int (*)(const void*, const void*)>(comparator));
   }
 
  private:
@@ -88,31 +86,50 @@ class ScandirResult {
     return copy;
   }
 
-  DISALLOW_COPY_AND_ASSIGN(ScandirResult);
+  BIONIC_DISALLOW_COPY_AND_ASSIGN(ScandirResult);
 };
 
-int scandir(const char* dirname, dirent*** name_list,
-            int (*filter)(const dirent*),
-            int (*comparator)(const dirent**, const dirent**)) {
-  ScopedReaddir reader(dirname);
+int scandirat(int parent_fd, const char* dir_name, dirent*** name_list,
+              int (*filter)(const dirent*),
+              int (*comparator)(const dirent**, const dirent**)) {
+  DIR* dir = nullptr;
+  if (parent_fd == AT_FDCWD) {
+    dir = opendir(dir_name);
+  } else {
+    int dir_fd = openat(parent_fd, dir_name, O_CLOEXEC | O_DIRECTORY | O_RDONLY);
+    if (dir_fd != -1) {
+      dir = fdopendir(dir_fd);
+    }
+  }
+
+  ScopedReaddir reader(dir);
   if (reader.IsBad()) {
     return -1;
   }
 
   ScandirResult names;
   dirent* entry;
-  while ((entry = reader.ReadEntry()) != NULL) {
+  while ((entry = reader.ReadEntry()) != nullptr) {
     // If we have a filter, skip names that don't match.
-    if (filter != NULL && !(*filter)(entry)) {
+    if (filter != nullptr && !(*filter)(entry)) {
       continue;
     }
     names.Add(entry);
   }
 
-  names.Sort(comparator);
+  if (comparator != nullptr) {
+    names.Sort(comparator);
+  }
 
   size_t size = names.size();
   *name_list = names.release();
   return size;
+}
+__strong_alias(scandirat64, scandirat);
+
+int scandir(const char* dir_path, dirent*** name_list,
+            int (*filter)(const dirent*),
+            int (*comparator)(const dirent**, const dirent**)) {
+  return scandirat(AT_FDCWD, dir_path, name_list, filter, comparator);
 }
 __strong_alias(scandir64, scandir);

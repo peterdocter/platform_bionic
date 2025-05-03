@@ -31,7 +31,6 @@
 
 #include <sys/cdefs.h>
 #include <sys/types.h>
-#include <linux/socket.h>
 
 #include <asm/fcntl.h>
 #include <asm/socket.h>
@@ -40,20 +39,15 @@
 #include <linux/types.h>
 #include <linux/compiler.h>
 
-__BEGIN_DECLS
+#include <bits/sockaddr_storage.h>
+#include <bits/sa_family_t.h>
 
-#define sockaddr_storage __kernel_sockaddr_storage
-typedef unsigned short sa_family_t;
+__BEGIN_DECLS
 
 struct timespec;
 
-#ifdef __mips__
-#define SOCK_DGRAM      1
-#define SOCK_STREAM     2
-#else
 #define SOCK_STREAM     1
 #define SOCK_DGRAM      2
-#endif
 #define SOCK_RAW        3
 #define SOCK_RDM        4
 #define SOCK_SEQPACKET  5
@@ -76,6 +70,9 @@ struct sockaddr {
   sa_family_t sa_family;
   char sa_data[14];
 };
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
 
 struct linger {
   int l_onoff;
@@ -103,6 +100,8 @@ struct cmsghdr {
   int cmsg_type;
 };
 
+#pragma clang diagnostic pop
+
 #define CMSG_NXTHDR(mhdr, cmsg) __cmsg_nxthdr((mhdr), (cmsg))
 #define CMSG_ALIGN(len) ( ((len)+sizeof(long)-1) & ~(sizeof(long)-1) )
 #define CMSG_DATA(cmsg) (((unsigned char*)(cmsg) + CMSG_ALIGN(sizeof(struct cmsghdr))))
@@ -113,7 +112,7 @@ struct cmsghdr {
    ? (struct cmsghdr*) (msg)->msg_control : (struct cmsghdr*) NULL)
 #define CMSG_OK(mhdr, cmsg) ((cmsg)->cmsg_len >= sizeof(struct cmsghdr) &&   (cmsg)->cmsg_len <= (unsigned long)   ((mhdr)->msg_controllen -   ((char*)(cmsg) - (char*)(mhdr)->msg_control)))
 
-struct cmsghdr* __cmsg_nxthdr(struct msghdr*, struct cmsghdr*);
+struct cmsghdr* _Nullable __cmsg_nxthdr(struct msghdr* _Nonnull __msg, struct cmsghdr* _Nonnull __cmsg);
 
 #define SCM_RIGHTS 0x01
 #define SCM_CREDENTIALS 0x02
@@ -164,7 +163,11 @@ struct ucred {
 #define AF_IEEE802154 36
 #define AF_CAIF 37
 #define AF_ALG 38
-#define AF_MAX 39
+#define AF_NFC 39
+#define AF_VSOCK 40
+#define AF_KCM 41
+#define AF_QIPCRTR 42
+#define AF_MAX 43
 
 #define PF_UNSPEC AF_UNSPEC
 #define PF_UNIX AF_UNIX
@@ -205,6 +208,10 @@ struct ucred {
 #define PF_IEEE802154 AF_IEEE802154
 #define PF_CAIF AF_CAIF
 #define PF_ALG AF_ALG
+#define PF_NFC AF_NFC
+#define PF_VSOCK AF_VSOCK
+#define PF_KCM AF_KCM
+#define PF_QIPCRTR AF_QIPCRTR
 #define PF_MAX AF_MAX
 
 #define SOMAXCONN 128
@@ -227,6 +234,7 @@ struct ucred {
 #define MSG_NOSIGNAL 0x4000
 #define MSG_MORE 0x8000
 #define MSG_WAITFORONE 0x10000
+#define MSG_BATCH 0x40000
 #define MSG_FASTOPEN 0x20000000
 #define MSG_CMSG_CLOEXEC 0x40000000
 #define MSG_EOF MSG_FIN
@@ -255,74 +263,47 @@ struct ucred {
 #define SOL_DCCP 269
 #define SOL_NETLINK 270
 #define SOL_TIPC 271
+#define SOL_RXRPC 272
+#define SOL_PPPOL2TP 273
+#define SOL_BLUETOOTH 274
+#define SOL_PNPIPE 275
+#define SOL_RDS 276
+#define SOL_IUCV 277
+#define SOL_CAIF 278
+#define SOL_ALG 279
+#define SOL_NFC 280
+#define SOL_KCM 281
+#define SOL_TLS 282
 
 #define IPX_TYPE 1
 
-#ifdef __i386__
-# define __socketcall extern __attribute__((__cdecl__))
-#else
-# define __socketcall extern
+int accept(int __fd, struct sockaddr* _Nullable __addr, socklen_t* _Nullable __addr_length);
+int accept4(int __fd, struct sockaddr* _Nullable __addr, socklen_t* _Nullable __addr_length, int __flags);
+int bind(int __fd, const struct sockaddr* _Nonnull __addr, socklen_t __addr_length);
+int connect(int __fd, const struct sockaddr* _Nonnull __addr, socklen_t __addr_length);
+int getpeername(int __fd, struct sockaddr* _Nonnull __addr, socklen_t* _Nonnull __addr_length);
+int getsockname(int __fd, struct sockaddr* _Nonnull __addr, socklen_t* _Nonnull __addr_length);
+int getsockopt(int __fd, int __level, int __option, void* _Nullable __value, socklen_t* _Nonnull __value_length);
+int listen(int __fd, int __backlog);
+int recvmmsg(int __fd, struct mmsghdr* _Nonnull __msgs, unsigned int __msg_count, int __flags, const struct timespec* _Nullable __timeout);
+ssize_t recvmsg(int __fd, struct msghdr* _Nonnull __msg, int __flags);
+int sendmmsg(int __fd, const struct mmsghdr* _Nonnull __msgs, unsigned int __msg_count, int __flags);
+ssize_t sendmsg(int __fd, const struct msghdr* _Nonnull __msg, int __flags);
+int setsockopt(int __fd, int __level, int __option, const void* _Nullable __value, socklen_t __value_length);
+int shutdown(int __fd, int __how);
+int socket(int __af, int __type, int __protocol);
+int socketpair(int __af, int __type, int __protocol, int __fds[_Nonnull 2]);
+
+ssize_t recv(int __fd, void* _Nullable __buf, size_t __n, int __flags);
+ssize_t send(int __fd, const void* _Nonnull __buf, size_t __n, int __flags);
+
+ssize_t sendto(int __fd, const void* _Nonnull __buf, size_t __n, int __flags, const struct sockaddr* _Nullable __dst_addr, socklen_t __dst_addr_length);
+ssize_t recvfrom(int __fd, void* _Nullable __buf, size_t __n, int __flags, struct sockaddr* _Nullable __src_addr, socklen_t* _Nullable __src_addr_length);
+
+#if defined(__BIONIC_INCLUDE_FORTIFY_HEADERS)
+#include <bits/fortify/socket.h>
 #endif
-
-__socketcall int accept(int, struct sockaddr*, socklen_t*);
-__socketcall int accept4(int, struct sockaddr*, socklen_t*, int);
-__socketcall int bind(int, const struct sockaddr*, int);
-__socketcall int connect(int, const struct sockaddr*, socklen_t);
-__socketcall int getpeername(int, struct sockaddr*, socklen_t*);
-__socketcall int getsockname(int, struct sockaddr*, socklen_t*);
-__socketcall int getsockopt(int, int, int, void*, socklen_t*);
-__socketcall int listen(int, int);
-__socketcall int recvmmsg(int, struct mmsghdr*, unsigned int, int, const struct timespec*);
-__socketcall int recvmsg(int, struct msghdr*, int);
-__socketcall int sendmmsg(int, const struct mmsghdr*, unsigned int, int);
-__socketcall int sendmsg(int, const struct msghdr*, int);
-__socketcall int setsockopt(int, int, int, const void*, socklen_t);
-__socketcall int shutdown(int, int);
-__socketcall int socket(int, int, int);
-__socketcall int socketpair(int, int, int, int*);
-
-extern ssize_t send(int, const void*, size_t, int);
-extern ssize_t recv(int, void*, size_t, int);
-
-__socketcall ssize_t sendto(int, const void*, size_t, int, const struct sockaddr*, socklen_t);
-__socketcall ssize_t recvfrom(int, void*, size_t, int, const struct sockaddr*, socklen_t*);
-
-__errordecl(__recvfrom_error, "recvfrom called with size bigger than buffer");
-extern ssize_t __recvfrom_chk(int, void*, size_t, size_t, int, const struct sockaddr*, socklen_t*);
-extern ssize_t __recvfrom_real(int, void*, size_t, int, const struct sockaddr*, socklen_t*) __RENAME(recvfrom);
-
-#if defined(__BIONIC_FORTIFY)
-
-__BIONIC_FORTIFY_INLINE
-ssize_t recvfrom(int fd, void* buf, size_t len, int flags, const struct sockaddr* src_addr, socklen_t* addr_len) {
-  size_t bos = __bos0(buf);
-
-#if !defined(__clang__)
-  if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-    return __recvfrom_real(fd, buf, len, flags, src_addr, addr_len);
-  }
-
-  if (__builtin_constant_p(len) && (len <= bos)) {
-    return __recvfrom_real(fd, buf, len, flags, src_addr, addr_len);
-  }
-
-  if (__builtin_constant_p(len) && (len > bos)) {
-    __recvfrom_error();
-  }
-#endif
-
-  return __recvfrom_chk(fd, buf, len, bos, flags, src_addr, addr_len);
-}
-
-__BIONIC_FORTIFY_INLINE
-ssize_t recv(int socket, void* buf, size_t len, int flags) {
-  return recvfrom(socket, buf, len, flags, NULL, 0);
-}
-
-#endif /* __BIONIC_FORTIFY */
-
-#undef __socketcall
 
 __END_DECLS
 
-#endif /* _SYS_SOCKET_H */
+#endif

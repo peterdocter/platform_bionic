@@ -1,4 +1,4 @@
-/*	$OpenBSD: getdelim.c,v 1.2 2014/10/16 17:31:51 millert Exp $	*/
+/*	$OpenBSD: getdelim.c,v 1.6 2017/04/13 18:36:51 brynet Exp $	*/
 /* $NetBSD: getdelim.c,v 1.13 2011/07/22 23:12:30 joerg Exp $ */
 
 /*
@@ -30,6 +30,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,7 +73,7 @@ getdelim(char **__restrict buf, size_t *__restrict buflen,
 		}
 
 		/* Scan through looking for the separator */
-		p = memchr(fp->_p, sep, (size_t)fp->_r);
+		p = memchr(fp->_p, sep, fp->_r);
 		if (p == NULL)
 			len = fp->_r;
 		else
@@ -96,13 +97,13 @@ getdelim(char **__restrict buf, size_t *__restrict buflen,
 				newlen |= newlen >> 4;
 				newlen |= newlen >> 8;
 				newlen |= newlen >> 16;
-#if SIZE_T_MAX > 0xffffffffU
+#if SIZE_MAX > 0xffffffffU
 				newlen |= newlen >> 32;
 #endif
 				newlen++;
 			}
 
-			newb = realloc(*buf, newlen);
+			newb = recallocarray(*buf, *buflen, newlen, 1);
 			if (newb == NULL)
 				goto error;
 			*buf = newb;
@@ -131,3 +132,4 @@ error:
 	FUNLOCKFILE(fp);
 	return -1;
 }
+DEF_WEAK(getdelim);

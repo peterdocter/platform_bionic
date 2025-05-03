@@ -25,8 +25,9 @@
 #ifndef	_FTW_H
 #define	_FTW_H
 
-#include <sys/types.h>
+#include <sys/cdefs.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 /*
  * Valid flags for the 3rd argument to the function that is passed as the
@@ -54,12 +55,10 @@ struct FTW {
 };
 
 __BEGIN_DECLS
-int	ftw(const char *, int (*)(const char *, const struct stat *, int), int);
-int	nftw(const char *, int (*)(const char *, const struct stat *, int,
-	    struct FTW *), int, int);
-int	ftw64(const char *, int (*)(const char *, const struct stat64 *, int), int);
-int	nftw64(const char *, int (*)(const char *, const struct stat64 *, int,
-	    struct FTW *), int, int);
+int ftw(const char* _Nonnull __dir_path, int (* _Nonnull __callback)(const char* _Nonnull, const struct stat* _Nonnull, int), int __max_fd_count);
+int nftw(const char* _Nonnull __dir_path, int (* _Nonnull __callback)(const char* _Nonnull, const struct stat* _Nonnull, int, struct FTW* _Nonnull), int __max_fd_count, int __flags);
+int ftw64(const char* _Nonnull __dir_path, int (* _Nonnull __callback)(const char* _Nonnull, const struct stat64* _Nonnull, int), int __max_fd_count);
+int nftw64(const char* _Nonnull __dir_path, int (* _Nonnull __callback)(const char* _Nonnull, const struct stat64* _Nonnull, int, struct FTW* _Nonnull), int __max_fd_count, int __flags);
 __END_DECLS
 
-#endif	/* !_FTW_H */
+#endif

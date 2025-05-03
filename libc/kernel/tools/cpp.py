@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 """A glorified C pre-processor parser."""
 
 import ctypes
@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import site
+import unittest
 import utils
 
 top = os.getenv('ANDROID_BUILD_TOP')
@@ -13,7 +14,7 @@ if top is None:
     utils.panic('ANDROID_BUILD_TOP not set.\n')
 
 # Set up the env vars for libclang.
-site.addsitedir(os.path.join(top, 'external/clang/bindings/python'))
+site.addsitedir(os.path.join(top, 'prebuilts/clang/host/linux-x86/clang-stable/lib/python3/site-packages/'))
 
 import clang.cindex
 from clang.cindex import conf
@@ -27,11 +28,9 @@ from clang.cindex import TranslationUnit
 
 # Set up LD_LIBRARY_PATH to include libclang.so, libLLVM.so, and etc.
 # Note that setting LD_LIBRARY_PATH with os.putenv() sometimes doesn't help.
-clang.cindex.Config.set_library_path(os.path.join(top, 'prebuilts/sdk/tools/linux/lib64'))
+clang.cindex.Config.set_library_file(os.path.join(top, 'prebuilts/clang/host/linux-x86/clang-stable/lib/libclang.so'))
 
-from defaults import kCppUndefinedMacro
-from defaults import kernel_remove_config_macros
-from defaults import kernel_token_replacements
+from defaults import *
 
 
 debugBlockParser = False
@@ -156,6 +155,11 @@ class BadExpectedToken(Exception):
     pass
 
 
+class UnparseableStruct(Exception):
+    """An exception that will be raised for structs that cannot be parsed."""
+    pass
+
+
 # The __contains__ function in libclang SourceRange class contains a bug. It
 # gives wrong result when dealing with single line range.
 # Bug filed with upstream:
@@ -255,7 +259,7 @@ class CppTokenizer(object):
         token_group = TokenGroup(self._tu, tokens_memory, tokens_count)
 
         tokens = []
-        for i in xrange(0, count):
+        for i in range(0, count):
             token = Token(self._tu, token_group,
                           int_data=tokens_array[i].int_data,
                           ptr_data=tokens_array[i].ptr_data,
@@ -268,7 +272,7 @@ class CppTokenizer(object):
 
     def parseString(self, lines):
         """Parse a list of text lines into a BlockList object."""
-        file_ = 'dummy.c'
+        file_ = 'no-filename-available.c'
         self._tu = self._indexer.parse(file_, self.clang_flags,
                                        unsaved_files=[(file_, lines)],
                                        options=self.options)
@@ -308,75 +312,50 @@ class CppFileTokenizer(CppTokenizer):
 
 # Unit testing
 #
-class CppTokenizerTester(object):
-    """A class used to test CppTokenizer classes."""
+class CppTokenizerTests(unittest.TestCase):
+    """CppTokenizer tests."""
 
-    def __init__(self, tokenizer=None):
-        self._tokenizer = tokenizer
-        self._token = None
+    def get_tokens(self, token_string, line_col=False):
+        tokens = CppStringTokenizer(token_string)
+        token_list = []
+        while True:
+            token = tokens.nextToken()
+            if not token:
+                break
+            if line_col:
+                token_list.append((token.id, token.location.line,
+                                   token.location.column))
+            else:
+                token_list.append(token.id)
+        return token_list
 
-    def setTokenizer(self, tokenizer):
-        self._tokenizer = tokenizer
+    def test_hash(self):
+        self.assertEqual(self.get_tokens("#an/example  && (01923_xy)"),
+                         ["#", "an", "/", "example", tokLOGICAND, tokLPAREN,
+                          "01923_xy", tokRPAREN])
 
-    def expect(self, id):
-        self._token = self._tokenizer.nextToken()
-        if self._token is None:
-            tokid = ''
-        else:
-            tokid = self._token.id
-        if tokid == id:
-            return
-        raise BadExpectedToken("###  BAD TOKEN: '%s' expecting '%s'" % (
-            tokid, id))
+    def test_parens(self):
+        self.assertEqual(self.get_tokens("FOO(BAR) && defined(BAZ)"),
+                         ["FOO", tokLPAREN, "BAR", tokRPAREN, tokLOGICAND,
+                          "defined", tokLPAREN, "BAZ", tokRPAREN])
 
-    def expectToken(self, id, line, col):
-        self.expect(id)
-        if self._token.location.line != line:
-            raise BadExpectedToken(
-                "###  BAD LINENO: token '%s' got '%d' expecting '%d'" % (
-                    id, self._token.lineno, line))
-        if self._token.location.column != col:
-            raise BadExpectedToken("###  BAD COLNO: '%d' expecting '%d'" % (
-                self._token.colno, col))
+    def test_comment(self):
+        self.assertEqual(self.get_tokens("/*\n#\n*/"), [])
 
-    def expectTokens(self, tokens):
-        for id, line, col in tokens:
-            self.expectToken(id, line, col)
+    def test_line_cross(self):
+        self.assertEqual(self.get_tokens("first\nsecond"), ["first", "second"])
 
-    def expectList(self, list_):
-        for item in list_:
-            self.expect(item)
+    def test_line_cross_line_col(self):
+        self.assertEqual(self.get_tokens("first second\n  third", True),
+                         [("first", 1, 1), ("second", 1, 7), ("third", 2, 3)])
 
+    def test_comment_line_col(self):
+        self.assertEqual(self.get_tokens("boo /* what the\nhell */", True),
+                         [("boo", 1, 1)])
 
-def test_CppTokenizer():
-    tester = CppTokenizerTester()
-
-    tester.setTokenizer(CppStringTokenizer("#an/example  && (01923_xy)"))
-    tester.expectList(["#", "an", "/", "example", tokLOGICAND, tokLPAREN,
-                       "01923_xy", tokRPAREN])
-
-    tester.setTokenizer(CppStringTokenizer("FOO(BAR) && defined(BAZ)"))
-    tester.expectList(["FOO", tokLPAREN, "BAR", tokRPAREN, tokLOGICAND,
-                       "defined", tokLPAREN, "BAZ", tokRPAREN])
-
-    tester.setTokenizer(CppStringTokenizer("/*\n#\n*/"))
-    tester.expectList([])
-
-    tester.setTokenizer(CppStringTokenizer("first\nsecond"))
-    tester.expectList(["first", "second"])
-
-    tester.setTokenizer(CppStringTokenizer("first second\n  third"))
-    tester.expectTokens([("first", 1, 1),
-                         ("second", 1, 7),
-                         ("third", 2, 3)])
-
-    tester.setTokenizer(CppStringTokenizer("boo /* what the\nhell */"))
-    tester.expectTokens([("boo", 1, 1)])
-
-    tester.setTokenizer(CppStringTokenizer("an \\\n example"))
-    tester.expectTokens([("an", 1, 1),
-                         ("example", 2, 2)])
-    return True
+    def test_escapes(self):
+        self.assertEqual(self.get_tokens("an \\\n example", True),
+                         [("an", 1, 1), ("example", 2, 2)])
 
 
 ################################################################################
@@ -420,10 +399,10 @@ class CppExpr(object):
         self._index = 0
 
         if debugCppExpr:
-            print "CppExpr: trying to parse %s" % repr(tokens)
+            print("CppExpr: trying to parse %s" % repr(tokens))
         self.expr = self.parseExpression(0)
         if debugCppExpr:
-            print "CppExpr: got " + repr(self.expr)
+            print("CppExpr: got " + repr(self.expr))
         if self._index != self._num_tokens:
             self.throw(BadExpectedToken, "crap at end of input (%d != %d): %s"
                        % (self._index, self._num_tokens, repr(tokens)))
@@ -431,9 +410,9 @@ class CppExpr(object):
     def throw(self, exception, msg):
         if self._index < self._num_tokens:
             tok = self.tokens[self._index]
-            print "%d:%d: %s" % (tok.location.line, tok.location.column, msg)
+            print("%d:%d: %s" % (tok.location.line, tok.location.column, msg))
         else:
-            print "EOF: %s" % msg
+            print("EOF: %s" % msg)
         raise exception(msg)
 
     def expectId(self, id):
@@ -748,7 +727,7 @@ class CppExpr(object):
 
         if op == "defined":
             op, name = e
-            if macros.has_key(name):
+            if name in macros:
                 if macros[name] == kCppUndefinedMacro:
                     return ("int", 0)
                 else:
@@ -765,7 +744,7 @@ class CppExpr(object):
 
         elif op == "ident":
             op, name = e
-            if macros.has_key(name):
+            if name in macros:
                 try:
                     value = int(macros[name])
                     expanded = ("int", value)
@@ -828,134 +807,137 @@ class CppExpr(object):
             macros = {}
         self.expr = self.optimize_node(self.expr, macros)
 
+class CppExprTest(unittest.TestCase):
+    """CppExpr unit tests."""
 
-def test_cpp_expr(expr, expected):
-    e = CppExpr(CppStringTokenizer(expr).tokens)
-    s1 = repr(e)
-    if s1 != expected:
-        print ("[FAIL]: expression '%s' generates '%s', should be "
-               "'%s'" % (expr, s1, expected))
-        global failure_count
-        failure_count += 1
+    def get_expr(self, expr):
+        return repr(CppExpr(CppStringTokenizer(expr).tokens))
 
+    def test_cpp_expr(self):
+        self.assertEqual(self.get_expr("0"), "(int 0)")
+        self.assertEqual(self.get_expr("1"), "(int 1)")
+        self.assertEqual(self.get_expr("-5"), "(int -5)")
+        self.assertEqual(self.get_expr("+1"), "(int 1)")
+        self.assertEqual(self.get_expr("0U"), "(int 0)")
+        self.assertEqual(self.get_expr("015"), "(oct 015)")
+        self.assertEqual(self.get_expr("015l"), "(oct 015)")
+        self.assertEqual(self.get_expr("0x3e"), "(hex 0x3e)")
+        self.assertEqual(self.get_expr("(0)"), "(int 0)")
+        self.assertEqual(self.get_expr("1 && 1"), "(&& (int 1) (int 1))")
+        self.assertEqual(self.get_expr("1 && 0"), "(&& (int 1) (int 0))")
+        self.assertEqual(self.get_expr("EXAMPLE"), "(ident EXAMPLE)")
+        self.assertEqual(self.get_expr("EXAMPLE - 3"),
+                         "(- (ident EXAMPLE) (int 3))")
+        self.assertEqual(self.get_expr("defined(EXAMPLE)"),
+                         "(defined EXAMPLE)")
+        self.assertEqual(self.get_expr("defined ( EXAMPLE ) "),
+                         "(defined EXAMPLE)")
+        self.assertEqual(self.get_expr("!defined(EXAMPLE)"),
+                         "(! (defined EXAMPLE))")
+        self.assertEqual(self.get_expr("defined(ABC) || defined(BINGO)"),
+                         "(|| (defined ABC) (defined BINGO))")
+        self.assertEqual(self.get_expr("FOO(BAR,5)"), "(call FOO [BAR,5])")
+        self.assertEqual(self.get_expr("A == 1 || defined(B)"),
+                         "(|| (== (ident A) (int 1)) (defined B))")
 
-def test_cpp_expr_optim(expr, expected, macros=None):
-    if macros is None:
-        macros = {}
-    e = CppExpr(CppStringTokenizer(expr).tokens)
-    e.optimize(macros)
-    s1 = repr(e)
-    if s1 != expected:
-        print ("[FAIL]: optimized expression '%s' generates '%s' with "
-               "macros %s, should be '%s'" % (expr, s1, macros, expected))
-        global failure_count
-        failure_count += 1
+    def get_expr_optimize(self, expr, macros=None):
+        if macros is None:
+            macros = {}
+        e = CppExpr(CppStringTokenizer(expr).tokens)
+        e.optimize(macros)
+        return repr(e)
 
-
-def test_cpp_expr_source(expr, expected):
-    e = CppExpr(CppStringTokenizer(expr).tokens)
-    s1 = str(e)
-    if s1 != expected:
-        print ("[FAIL]: source expression '%s' generates '%s', should "
-               "be '%s'" % (expr, s1, expected))
-        global failure_count
-        failure_count += 1
-
-
-def test_CppExpr():
-    test_cpp_expr("0", "(int 0)")
-    test_cpp_expr("1", "(int 1)")
-    test_cpp_expr("-5", "(int -5)")
-    test_cpp_expr("+1", "(int 1)")
-    test_cpp_expr("0U", "(int 0)")
-    test_cpp_expr("015", "(oct 015)")
-    test_cpp_expr("015l", "(oct 015)")
-    test_cpp_expr("0x3e", "(hex 0x3e)")
-    test_cpp_expr("(0)", "(int 0)")
-    test_cpp_expr("1 && 1", "(&& (int 1) (int 1))")
-    test_cpp_expr("1 && 0", "(&& (int 1) (int 0))")
-    test_cpp_expr("EXAMPLE", "(ident EXAMPLE)")
-    test_cpp_expr("EXAMPLE - 3", "(- (ident EXAMPLE) (int 3))")
-    test_cpp_expr("defined(EXAMPLE)", "(defined EXAMPLE)")
-    test_cpp_expr("defined ( EXAMPLE ) ", "(defined EXAMPLE)")
-    test_cpp_expr("!defined(EXAMPLE)", "(! (defined EXAMPLE))")
-    test_cpp_expr("defined(ABC) || defined(BINGO)",
-                  "(|| (defined ABC) (defined BINGO))")
-    test_cpp_expr("FOO(BAR,5)", "(call FOO [BAR,5])")
-    test_cpp_expr("A == 1 || defined(B)",
-                  "(|| (== (ident A) (int 1)) (defined B))")
-
-    test_cpp_expr_optim("0", "(int 0)")
-    test_cpp_expr_optim("1", "(int 1)")
-    test_cpp_expr_optim("1 && 1", "(int 1)")
-    test_cpp_expr_optim("1 && +1", "(int 1)")
-    test_cpp_expr_optim("0x1 && 01", "(oct 01)")
-    test_cpp_expr_optim("1 && 0", "(int 0)")
-    test_cpp_expr_optim("0 && 1", "(int 0)")
-    test_cpp_expr_optim("0 && 0", "(int 0)")
-    test_cpp_expr_optim("1 || 1", "(int 1)")
-    test_cpp_expr_optim("1 || 0", "(int 1)")
-    test_cpp_expr_optim("0 || 1", "(int 1)")
-    test_cpp_expr_optim("0 || 0", "(int 0)")
-    test_cpp_expr_optim("A", "(ident A)")
-    test_cpp_expr_optim("A", "(int 1)", {"A": 1})
-    test_cpp_expr_optim("A || B", "(int 1)", {"A": 1})
-    test_cpp_expr_optim("A || B", "(int 1)", {"B": 1})
-    test_cpp_expr_optim("A && B", "(ident B)", {"A": 1})
-    test_cpp_expr_optim("A && B", "(ident A)", {"B": 1})
-    test_cpp_expr_optim("A && B", "(&& (ident A) (ident B))")
-    test_cpp_expr_optim("EXAMPLE", "(ident EXAMPLE)")
-    test_cpp_expr_optim("EXAMPLE - 3", "(- (ident EXAMPLE) (int 3))")
-    test_cpp_expr_optim("defined(EXAMPLE)", "(defined EXAMPLE)")
-    test_cpp_expr_optim("defined(EXAMPLE)", "(defined XOWOE)",
-                        {"EXAMPLE": "XOWOE"})
-    test_cpp_expr_optim("defined(EXAMPLE)", "(int 0)",
-                        {"EXAMPLE": kCppUndefinedMacro})
-    test_cpp_expr_optim("!defined(EXAMPLE)", "(! (defined EXAMPLE))")
-    test_cpp_expr_optim("!defined(EXAMPLE)", "(! (defined XOWOE))",
-                        {"EXAMPLE": "XOWOE"})
-    test_cpp_expr_optim("!defined(EXAMPLE)", "(int 1)",
-                        {"EXAMPLE": kCppUndefinedMacro})
-    test_cpp_expr_optim("defined(A) || defined(B)",
+    def test_cpp_expr_optimize(self):
+        self.assertEqual(self.get_expr_optimize("0"), "(int 0)")
+        self.assertEqual(self.get_expr_optimize("1"), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("1 && 1"), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("1 && +1"), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("0x1 && 01"), "(oct 01)")
+        self.assertEqual(self.get_expr_optimize("1 && 0"), "(int 0)")
+        self.assertEqual(self.get_expr_optimize("0 && 1"), "(int 0)")
+        self.assertEqual(self.get_expr_optimize("0 && 0"), "(int 0)")
+        self.assertEqual(self.get_expr_optimize("1 || 1"), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("1 || 0"), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("0 || 1"), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("0 || 0"), "(int 0)")
+        self.assertEqual(self.get_expr_optimize("A"), "(ident A)")
+        self.assertEqual(self.get_expr_optimize("A", {"A": 1}), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("A || B", {"A": 1}), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("A || B", {"B": 1}), "(int 1)")
+        self.assertEqual(self.get_expr_optimize("A && B", {"A": 1}), "(ident B)")
+        self.assertEqual(self.get_expr_optimize("A && B", {"B": 1}), "(ident A)")
+        self.assertEqual(self.get_expr_optimize("A && B"), "(&& (ident A) (ident B))")
+        self.assertEqual(self.get_expr_optimize("EXAMPLE"), "(ident EXAMPLE)")
+        self.assertEqual(self.get_expr_optimize("EXAMPLE - 3"), "(- (ident EXAMPLE) (int 3))")
+        self.assertEqual(self.get_expr_optimize("defined(EXAMPLE)"), "(defined EXAMPLE)")
+        self.assertEqual(self.get_expr_optimize("defined(EXAMPLE)",
+                                                {"EXAMPLE": "XOWOE"}),
+                         "(defined XOWOE)")
+        self.assertEqual(self.get_expr_optimize("defined(EXAMPLE)",
+                                                {"EXAMPLE": kCppUndefinedMacro}),
+                         "(int 0)")
+        self.assertEqual(self.get_expr_optimize("!defined(EXAMPLE)"), "(! (defined EXAMPLE))")
+        self.assertEqual(self.get_expr_optimize("!defined(EXAMPLE)",
+                                                {"EXAMPLE": "XOWOE"}),
+                         "(! (defined XOWOE))")
+        self.assertEqual(self.get_expr_optimize("!defined(EXAMPLE)",
+                                                {"EXAMPLE": kCppUndefinedMacro}),
+                         "(int 1)")
+        self.assertEqual(self.get_expr_optimize("defined(A) || defined(B)"),
                         "(|| (defined A) (defined B))")
-    test_cpp_expr_optim("defined(A) || defined(B)", "(int 1)", {"A": "1"})
-    test_cpp_expr_optim("defined(A) || defined(B)", "(int 1)", {"B": "1"})
-    test_cpp_expr_optim("defined(A) || defined(B)", "(defined A)",
-                        {"B": kCppUndefinedMacro})
-    test_cpp_expr_optim("defined(A) || defined(B)", "(int 0)",
-                        {"A": kCppUndefinedMacro, "B": kCppUndefinedMacro})
-    test_cpp_expr_optim("defined(A) && defined(B)",
-                        "(&& (defined A) (defined B))")
-    test_cpp_expr_optim("defined(A) && defined(B)",
-                        "(defined B)", {"A": "1"})
-    test_cpp_expr_optim("defined(A) && defined(B)",
-                        "(defined A)", {"B": "1"})
-    test_cpp_expr_optim("defined(A) && defined(B)", "(int 0)",
-                        {"B": kCppUndefinedMacro})
-    test_cpp_expr_optim("defined(A) && defined(B)",
-                        "(int 0)", {"A": kCppUndefinedMacro})
-    test_cpp_expr_optim("A == 1 || defined(B)",
-                        "(|| (== (ident A) (int 1)) (defined B))")
-    test_cpp_expr_optim(
-        "defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2)",
-        "(|| (! (defined __GLIBC__)) (< (ident __GLIBC__) (int 2)))",
-        {"__KERNEL__": kCppUndefinedMacro})
+        self.assertEqual(self.get_expr_optimize("defined(A) || defined(B)",
+                                                {"A": "1"}),
+                         "(int 1)")
+        self.assertEqual(self.get_expr_optimize("defined(A) || defined(B)",
+                                                {"B": "1"}),
+                         "(int 1)")
+        self.assertEqual(self.get_expr_optimize("defined(A) || defined(B)",
+                                                {"B": kCppUndefinedMacro}),
+                         "(defined A)")
+        self.assertEqual(self.get_expr_optimize("defined(A) || defined(B)",
+                                                {"A": kCppUndefinedMacro,
+                                                 "B": kCppUndefinedMacro}),
+                         "(int 0)")
+        self.assertEqual(self.get_expr_optimize("defined(A) && defined(B)"),
+                         "(&& (defined A) (defined B))")
+        self.assertEqual(self.get_expr_optimize("defined(A) && defined(B)",
+                                                {"A": "1"}),
+                         "(defined B)")
+        self.assertEqual(self.get_expr_optimize("defined(A) && defined(B)",
+                                                {"B": "1"}),
+                         "(defined A)")
+        self.assertEqual(self.get_expr_optimize("defined(A) && defined(B)",
+                                                {"B": kCppUndefinedMacro}),
+                        "(int 0)")
+        self.assertEqual(self.get_expr_optimize("defined(A) && defined(B)",
+                                                {"A": kCppUndefinedMacro}),
+                        "(int 0)")
+        self.assertEqual(self.get_expr_optimize("A == 1 || defined(B)"),
+                         "(|| (== (ident A) (int 1)) (defined B))")
+        self.assertEqual(self.get_expr_optimize(
+              "defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2)",
+              {"__KERNEL__": kCppUndefinedMacro}),
+              "(|| (! (defined __GLIBC__)) (< (ident __GLIBC__) (int 2)))")
 
-    test_cpp_expr_source("0", "0")
-    test_cpp_expr_source("1", "1")
-    test_cpp_expr_source("1 && 1", "1 && 1")
-    test_cpp_expr_source("1 && 0", "1 && 0")
-    test_cpp_expr_source("0 && 1", "0 && 1")
-    test_cpp_expr_source("0 && 0", "0 && 0")
-    test_cpp_expr_source("1 || 1", "1 || 1")
-    test_cpp_expr_source("1 || 0", "1 || 0")
-    test_cpp_expr_source("0 || 1", "0 || 1")
-    test_cpp_expr_source("0 || 0", "0 || 0")
-    test_cpp_expr_source("EXAMPLE", "EXAMPLE")
-    test_cpp_expr_source("EXAMPLE - 3", "EXAMPLE - 3")
-    test_cpp_expr_source("defined(EXAMPLE)", "defined(EXAMPLE)")
-    test_cpp_expr_source("defined EXAMPLE", "defined(EXAMPLE)")
-    test_cpp_expr_source("A == 1 || defined(B)", "A == 1 || defined(B)")
+    def get_expr_string(self, expr):
+        return str(CppExpr(CppStringTokenizer(expr).tokens))
+
+    def test_cpp_expr_string(self):
+        self.assertEqual(self.get_expr_string("0"), "0")
+        self.assertEqual(self.get_expr_string("1"), "1")
+        self.assertEqual(self.get_expr_string("1 && 1"), "1 && 1")
+        self.assertEqual(self.get_expr_string("1 && 0"), "1 && 0")
+        self.assertEqual(self.get_expr_string("0 && 1"), "0 && 1")
+        self.assertEqual(self.get_expr_string("0 && 0"), "0 && 0")
+        self.assertEqual(self.get_expr_string("1 || 1"), "1 || 1")
+        self.assertEqual(self.get_expr_string("1 || 0"), "1 || 0")
+        self.assertEqual(self.get_expr_string("0 || 1"), "0 || 1")
+        self.assertEqual(self.get_expr_string("0 || 0"), "0 || 0")
+        self.assertEqual(self.get_expr_string("EXAMPLE"), "EXAMPLE")
+        self.assertEqual(self.get_expr_string("EXAMPLE - 3"), "EXAMPLE - 3")
+        self.assertEqual(self.get_expr_string("defined(EXAMPLE)"), "defined(EXAMPLE)")
+        self.assertEqual(self.get_expr_string("defined EXAMPLE"), "defined(EXAMPLE)")
+        self.assertEqual(self.get_expr_string("A == 1 || defined(B)"), "A == 1 || defined(B)")
 
 
 ################################################################################
@@ -1057,11 +1039,14 @@ class Block(object):
             if t.id == '{':
                 buf += ' {'
                 result.append(strip_space(buf))
-                indent += 2
+                # Do not indent if this is extern "C" {
+                if i < 2 or tokens[i-2].id != 'extern' or tokens[i-1].id != '"C"':
+                    indent += 2
                 buf = ''
                 newline = True
             elif t.id == '}':
-                indent -= 2
+                if indent >= 2:
+                    indent -= 2
                 if not newline:
                     result.append(strip_space(buf))
                 # Look ahead to determine if it's the end of line.
@@ -1098,33 +1083,24 @@ class Block(object):
 
         return result, indent
 
-    def writeWithWarning(self, out, warning, left_count, repeat_count, indent):
-        """Dump the current block with warnings."""
+    def write(self, out, indent):
+        """Dump the current block."""
         # removeWhiteSpace() will sometimes creates non-directive blocks
         # without any tokens. These come from blocks that only contained
         # empty lines and spaces. They should not be printed in the final
         # output, and then should not be counted for this operation.
         #
         if self.directive is None and not self.tokens:
-            return left_count, indent
+            return indent
 
         if self.directive:
             out.write(str(self) + '\n')
-            left_count -= 1
-            if left_count == 0:
-                out.write(warning)
-                left_count = repeat_count
-
         else:
             lines, indent = self.format_blocks(self.tokens, indent)
             for line in lines:
                 out.write(line + '\n')
-                left_count -= 1
-                if left_count == 0:
-                    out.write(warning)
-                    left_count = repeat_count
 
-        return left_count, indent
+        return indent
 
     def __repr__(self):
         """Generate the representation of a given block."""
@@ -1208,11 +1184,11 @@ class BlockList(object):
 
     def dump(self):
         """Dump all the blocks in current BlockList."""
-        print '##### BEGIN #####'
+        print('##### BEGIN #####')
         for i, b in enumerate(self.blocks):
-            print '### BLOCK %d ###' % i
-            print b
-        print '##### END #####'
+            print('### BLOCK %d ###' % i)
+            print(b)
+        print('##### END #####')
 
     def optimizeIf01(self):
         """Remove the code between #if 0 .. #endif in a BlockList."""
@@ -1224,9 +1200,101 @@ class BlockList(object):
             if b.isIf():
                 b.expr.optimize(macros)
 
-    def removeMacroDefines(self, macros):
-        """Remove known macro definitions from a BlockList."""
-        self.blocks = remove_macro_defines(self.blocks, macros)
+    def removeStructs(self, structs):
+        """Remove structs."""
+        extra_includes = set()
+        block_num = 0
+        num_blocks = len(self.blocks)
+        while block_num < num_blocks:
+            b = self.blocks[block_num]
+            block_num += 1
+            # Have to look in each block for a top-level struct definition.
+            if b.directive:
+                continue
+            num_tokens = len(b.tokens)
+            # A struct definition usually looks like:
+            #   struct
+            #   ident
+            #   {
+            #   }
+            #   ;
+            # However, the structure might be spread across multiple blocks
+            # if the structure looks like this:
+            #   struct ident
+            #   {
+            #   #ifdef VARIABLE
+            #     pid_t pid;
+            #   #endif
+            #   }:
+            # So the total number of tokens in the block might be less than
+            # five but assume at least three.
+            if num_tokens < 3:
+                continue
+
+            # This is a simple struct finder, it might fail if a top-level
+            # structure has an #if type directives that confuses the algorithm
+            # for finding the end of the structure. Or if there is another
+            # structure definition embedded in the structure.
+            i = 0
+            while i < num_tokens - 2:
+                if (b.tokens[i].kind != TokenKind.KEYWORD or
+                    b.tokens[i].id != "struct"):
+                    i += 1
+                    continue
+                if (b.tokens[i + 1].kind == TokenKind.IDENTIFIER and
+                    b.tokens[i + 2].kind == TokenKind.PUNCTUATION and
+                    b.tokens[i + 2].id == "{" and b.tokens[i + 1].id in structs):
+                    # Add an include for the structure to be removed of the form:
+                    #  #include <bits/STRUCT_NAME.h>
+                    struct_token = b.tokens[i + 1]
+                    if struct_token.id in structs and structs[struct_token.id]:
+                        extra_includes.add("<%s>" % structs[struct_token.id])
+
+                    # Search forward for the end of the structure.
+                    # Very simple search, look for } and ; tokens.
+                    # If we hit the end of the block, we'll need to start
+                    # looking at the next block.
+                    j = i + 3
+                    depth = 1
+                    struct_removed = False
+                    while not struct_removed:
+                        while j < num_tokens:
+                            if b.tokens[j].kind == TokenKind.PUNCTUATION:
+                                if b.tokens[j].id == '{':
+                                    depth += 1
+                                elif b.tokens[j].id == '}':
+                                    depth -= 1
+                                elif b.tokens[j].id == ';' and depth == 0:
+                                    b.tokens = b.tokens[0:i] + b.tokens[j + 1:num_tokens]
+                                    num_tokens = len(b.tokens)
+                                    struct_removed = True
+                                    break
+                            j += 1
+                        if not struct_removed:
+                            b.tokens = b.tokens[0:i]
+
+                            # Skip directive blocks.
+                            start_block = block_num
+                            while block_num < num_blocks:
+                                if not self.blocks[block_num].directive:
+                                    break
+                                block_num += 1
+                            if block_num >= num_blocks:
+                                # Unparsable struct, error out.
+                                raise UnparseableStruct("Cannot remove struct %s: %s" % (struct_token.id, struct_token.location))
+                            self.blocks = self.blocks[0:start_block] + self.blocks[block_num:num_blocks]
+                            num_blocks = len(self.blocks)
+                            b = self.blocks[start_block]
+                            block_num = start_block + 1
+                            num_tokens = len(b.tokens)
+                            i = 0
+                            j = 0
+                    continue
+                i += 1
+
+        for extra_include in sorted(extra_includes):
+            replacement = CppStringTokenizer(extra_include)
+            self.blocks.insert(2, Block(replacement.tokens, directive='include'))
 
     def optimizeAll(self, macros):
         self.optimizeMacros(macros)
@@ -1243,170 +1311,183 @@ class BlockList(object):
         return result
 
     def write(self, out):
-        out.write(str(self))
-
-    def writeWithWarning(self, out, warning, repeat_count):
-        left_count = repeat_count
         indent = 0
         for b in self.blocks:
-            left_count, indent = b.writeWithWarning(out, warning, left_count,
-                                                    repeat_count, indent)
+            indent = b.write(out, indent)
 
-    def removeVarsAndFuncs(self, knownStatics=None):
+    def removeVarsAndFuncs(self, keep):
         """Remove variable and function declarations.
 
         All extern and static declarations corresponding to variable and
         function declarations are removed. We only accept typedefs and
         enum/structs/union declarations.
 
+        In addition, remove any macros expanding in the headers. Usually,
+        these macros are static inline functions, which is why they are
+        removed.
+
         However, we keep the definitions corresponding to the set of known
-        static inline functions in the set 'knownStatics', which is useful
+        static inline functions in the set 'keep', which is useful
         for optimized byteorder swap functions and stuff like that.
         """
 
-        # NOTE: It's also removing function-like macros, such as __SYSCALL(...)
-        # in uapi/asm-generic/unistd.h, or KEY_FIELD(...) in linux/bcache.h.
-        # It could be problematic when we have function-like macros but without
-        # '}' following them. It will skip all the tokens/blocks until seeing a
-        # '}' as the function end. Fortunately we don't have such cases in the
-        # current kernel headers.
+        # state = NORMAL => normal (i.e. LN + spaces)
+        # state = OTHER_DECL => typedef/struct encountered, ends with ";"
+        # state = VAR_DECL => var declaration encountered, ends with ";"
+        # state = FUNC_DECL => func declaration encountered, ends with "}"
+        NORMAL = 0
+        OTHER_DECL = 1
+        VAR_DECL = 2
+        FUNC_DECL = 3
 
-        # state = 0 => normal (i.e. LN + spaces)
-        # state = 1 => typedef/struct encountered, ends with ";"
-        # state = 2 => var declaration encountered, ends with ";"
-        # state = 3 => func declaration encountered, ends with "}"
-
-        if knownStatics is None:
-            knownStatics = set()
-        state = 0
+        state = NORMAL
         depth = 0
-        blocks2 = []
-        skipTokens = False
-        for b in self.blocks:
-            if b.isDirective():
-                blocks2.append(b)
-            else:
-                n = len(b.tokens)
-                i = 0
-                if skipTokens:
-                    first = n
-                else:
-                    first = 0
-                while i < n:
-                    tok = b.tokens[i]
-                    tokid = tok.id
-                    # If we are not looking for the start of a new
-                    # type/var/func, then skip over tokens until
-                    # we find our terminator, managing the depth of
-                    # accolades as we go.
-                    if state > 0:
-                        terminator = False
-                        if tokid == '{':
-                            depth += 1
-                        elif tokid == '}':
-                            if depth > 0:
-                                depth -= 1
-                            if (depth == 0) and (state == 3):
-                                terminator = True
-                        elif tokid == ';' and depth == 0:
-                            terminator = True
-
-                        if terminator:
-                            # we found the terminator
-                            state = 0
-                            if skipTokens:
-                                skipTokens = False
-                                first = i + 1
-
-                        i += 1
-                        continue
-
-                    # Is it a new type definition, then start recording it
-                    if tok.id in ['struct', 'typedef', 'enum', 'union',
-                                  '__extension__']:
-                        state = 1
-                        i += 1
-                        continue
-
-                    # Is it a variable or function definition. If so, first
-                    # try to determine which type it is, and also extract
-                    # its name.
-                    #
-                    # We're going to parse the next tokens of the same block
-                    # until we find a semi-column or a left parenthesis.
-                    #
-                    # The semi-column corresponds to a variable definition,
-                    # the left-parenthesis to a function definition.
-                    #
-                    # We also assume that the var/func name is the last
-                    # identifier before the terminator.
-                    #
-                    j = i + 1
-                    ident = ""
-                    while j < n:
-                        tokid = b.tokens[j].id
-                        if tokid == '(':  # a function declaration
-                            state = 3
-                            break
-                        elif tokid == ';':  # a variable declaration
-                            state = 2
-                            break
-                        if b.tokens[j].kind == TokenKind.IDENTIFIER:
-                            ident = b.tokens[j].id
-                        j += 1
-
-                    if j >= n:
-                        # This can only happen when the declaration
-                        # does not end on the current block (e.g. with
-                        # a directive mixed inside it.
-                        #
-                        # We will treat it as malformed because
-                        # it's very hard to recover from this case
-                        # without making our parser much more
-                        # complex.
-                        #
-                        logging.debug("### skip unterminated static '%s'",
-                                      ident)
-                        break
-
-                    if ident in knownStatics:
-                        logging.debug("### keep var/func '%s': %s", ident,
-                                      repr(b.tokens[i:j]))
+        blocksToKeep = []
+        blocksInProgress = []
+        blocksOfDirectives = []
+        ident = ""
+        state_token = ""
+        macros = set()
+        for block in self.blocks:
+            if block.isDirective():
+                # Record all macros.
+                if block.directive == 'define':
+                    macro_name = block.define_id
+                    paren_index = macro_name.find('(')
+                    if paren_index == -1:
+                        macros.add(macro_name)
                     else:
-                        # We're going to skip the tokens for this declaration
-                        logging.debug("### skip var/func '%s': %s", ident,
-                                      repr(b.tokens[i:j]))
-                        if i > first:
-                            blocks2.append(Block(b.tokens[first:i]))
-                        skipTokens = True
-                        first = n
+                        macros.add(macro_name[0:paren_index])
+                blocksInProgress.append(block)
+                # If this is in a function/variable declaration, we might need
+                # to emit the directives alone, so save them separately.
+                blocksOfDirectives.append(block)
+                continue
 
-                    i += 1
+            numTokens = len(block.tokens)
+            lastTerminatorIndex = 0
+            i = 0
+            while i < numTokens:
+                token_id = block.tokens[i].id
+                terminator = False
+                if token_id == '{':
+                    depth += 1
+                    if (i >= 2 and block.tokens[i-2].id == 'extern' and
+                        block.tokens[i-1].id == '"C"'):
+                        # For an extern "C" { pretend as though this is depth 0.
+                        depth -= 1
+                elif token_id == '}':
+                    if depth > 0:
+                        depth -= 1
+                    if depth == 0:
+                        if state == OTHER_DECL:
+                            # Loop through until we hit the ';'
+                            i += 1
+                            while i < numTokens:
+                                if block.tokens[i].id == ';':
+                                    token_id = ';'
+                                    break
+                                i += 1
+                            # If we didn't hit the ';', just consider this the
+                            # terminator any way.
+                        terminator = True
+                elif depth == 0:
+                    if token_id == ';':
+                        if state == NORMAL:
+                            blocksToKeep.extend(blocksInProgress)
+                            blocksInProgress = []
+                            blocksOfDirectives = []
+                            state = FUNC_DECL
+                        terminator = True
+                    elif (state == NORMAL and token_id == '(' and i >= 1 and
+                          block.tokens[i-1].kind == TokenKind.IDENTIFIER and
+                          block.tokens[i-1].id in macros):
+                        # This is a plain macro being expanded in the header
+                        # which needs to be removed.
+                        blocksToKeep.extend(blocksInProgress)
+                        if lastTerminatorIndex < i - 1:
+                            blocksToKeep.append(Block(block.tokens[lastTerminatorIndex:i-1]))
+                        blocksInProgress = []
+                        blocksOfDirectives = []
 
-                if i > first:
-                    # print "### final '%s'" % repr(b.tokens[first:i])
-                    blocks2.append(Block(b.tokens[first:i]))
+                        # Skip until we see the terminating ')'
+                        i += 1
+                        paren_depth = 1
+                        while i < numTokens:
+                            if block.tokens[i].id == ')':
+                                paren_depth -= 1
+                                if paren_depth == 0:
+                                    break
+                            elif block.tokens[i].id == '(':
+                                paren_depth += 1
+                            i += 1
+                        lastTerminatorIndex = i + 1
+                    elif (state != FUNC_DECL and token_id == '(' and
+                          state_token != 'typedef'):
+                        blocksToKeep.extend(blocksInProgress)
+                        blocksInProgress = []
+                        blocksOfDirectives = []
+                        state = VAR_DECL
+                    elif state == NORMAL and token_id in ['struct', 'typedef',
+                                                          'enum', 'union',
+                                                          '__extension__', '=']:
+                        state = OTHER_DECL
+                        state_token = token_id
+                    elif block.tokens[i].kind == TokenKind.IDENTIFIER:
+                        if state != VAR_DECL or ident == "":
+                            ident = token_id
 
-        self.blocks = blocks2
+                if terminator:
+                    if state != VAR_DECL and state != FUNC_DECL or ident in keep:
+                        blocksInProgress.append(Block(block.tokens[lastTerminatorIndex:i+1]))
+                        blocksToKeep.extend(blocksInProgress)
+                    else:
+                        # Only keep the directives found.
+                        blocksToKeep.extend(blocksOfDirectives)
+                    lastTerminatorIndex = i + 1
+                    blocksInProgress = []
+                    blocksOfDirectives = []
+                    state = NORMAL
+                    ident = ""
+                    state_token = ""
+                i += 1
+            if lastTerminatorIndex < numTokens:
+                blocksInProgress.append(Block(block.tokens[lastTerminatorIndex:numTokens]))
+        if len(blocksInProgress) > 0:
+            blocksToKeep.extend(blocksInProgress)
+        self.blocks = blocksToKeep
 
     def replaceTokens(self, replacements):
         """Replace tokens according to the given dict."""
         for b in self.blocks:
             made_change = False
             if b.isInclude() is None:
-                for tok in b.tokens:
+                i = 0
+                while i < len(b.tokens):
+                    tok = b.tokens[i]
                     if tok.kind == TokenKind.IDENTIFIER:
                         if tok.id in replacements:
                             tok.id = replacements[tok.id]
                             made_change = True
+                    i += 1
 
-                if b.isDefine() and b.define_id in replacements:
-                    b.define_id = replacements[b.define_id]
-                    made_change = True
+                if b.isDefine():
+                    tokens = CppStringTokenizer(b.define_id).tokens
+                    id_change = False
+                    for tok in tokens:
+                        if tok.kind == TokenKind.IDENTIFIER:
+                            if tok.id in replacements:
+                                tok.id = replacements[tok.id]
+                                id_change = True
+                    if id_change:
+                        b.define_id = ''.join([tok.id for tok in tokens])
+                        made_change = True
+
 
             if made_change and b.isIf():
                 # Keep 'expr' in sync with 'tokens'.
                 b.expr = CppExpr(b.tokens)
+
 
 
 def strip_space(s):
@@ -1471,7 +1552,7 @@ class BlockParser(object):
             while i < len(tokens) and tokens[i].location in extent:
                 t = tokens[i]
                 if debugBlockParser:
-                    print ' ' * 2, t.id, t.kind, t.cursor.kind
+                    print(' ' * 2, t.id, t.kind, t.cursor.kind)
                 if (detect_change and t.cursor.extent != extent and
                     t.cursor.kind == CursorKind.PREPROCESSING_DIRECTIVE):
                     break
@@ -1598,31 +1679,30 @@ class BlockParser(object):
         return self.getBlocks(CppFileTokenizer(path))
 
 
-def test_block_parsing(lines, expected):
-    """Helper method to test the correctness of BlockParser.parse."""
-    blocks = BlockParser().parse(CppStringTokenizer('\n'.join(lines)))
-    if len(blocks) != len(expected):
-        raise BadExpectedToken("BlockParser.parse() returned '%s' expecting "
-                               "'%s'" % (str(blocks), repr(expected)))
-    for n in range(len(blocks)):
-        if str(blocks[n]) != expected[n]:
-            raise BadExpectedToken("BlockParser.parse()[%d] is '%s', "
-                                   "expecting '%s'" % (n, str(blocks[n]),
-                                                       expected[n]))
+class BlockParserTests(unittest.TestCase):
+    """BlockParser unit tests."""
 
+    def get_blocks(self, lines):
+        blocks = BlockParser().parse(CppStringTokenizer('\n'.join(lines)))
+        return list(map(lambda a: str(a), blocks))
 
-def test_BlockParser():
-    test_block_parsing(["#error hello"], ["#error hello"])
-    test_block_parsing(["foo", "", "bar"], ["foo bar"])
+    def test_hash(self):
+        self.assertEqual(self.get_blocks(["#error hello"]), ["#error hello"])
 
-    # We currently cannot handle the following case with libclang properly.
-    # Fortunately it doesn't appear in current headers.
-    # test_block_parsing(["foo", "  #  ", "bar"], ["foo", "bar"])
+    def test_empty_line(self):
+        self.assertEqual(self.get_blocks(["foo", "", "bar"]), ["foo bar"])
 
-    test_block_parsing(["foo",
-                        "  #  /* ahah */ if defined(__KERNEL__) /* more */",
-                        "bar", "#endif"],
-                       ["foo", "#ifdef __KERNEL__", "bar", "#endif"])
+    def test_hash_with_space(self):
+        # We currently cannot handle the following case with libclang properly.
+        # Fortunately it doesn't appear in current headers.
+        #self.assertEqual(self.get_blocks(["foo", "  #  ", "bar"]), ["foo", "bar"])
+        pass
+
+    def test_with_comment(self):
+        self.assertEqual(self.get_blocks(["foo",
+                                          "  #  /* ahah */ if defined(__KERNEL__) /* more */",
+                                          "bar", "#endif"]),
+                         ["foo", "#ifdef __KERNEL__", "bar", "#endif"])
 
 
 ################################################################################
@@ -1632,19 +1712,6 @@ def test_BlockParser():
 #####                                                                      #####
 ################################################################################
 ################################################################################
-
-
-def remove_macro_defines(blocks, excludedMacros=None):
-    """Remove macro definitions like #define <macroName>  ...."""
-    if excludedMacros is None:
-        excludedMacros = set()
-    result = []
-    for b in blocks:
-        macroName = b.isDefine()
-        if macroName is None or macroName not in excludedMacros:
-            result.append(b)
-
-    return result
 
 
 def find_matching_endif(blocks, i):
@@ -1690,6 +1757,7 @@ def optimize_if01(blocks):
 
         if r == 0:
             # if 0 => skip everything until the corresponding #endif
+            start_dir = blocks[j].directive
             j = find_matching_endif(blocks, j + 1)
             if j >= n:
                 # unterminated #if 0, finish here
@@ -1698,18 +1766,27 @@ def optimize_if01(blocks):
             if dir_ == "endif":
                 logging.debug("remove 'if 0' .. 'endif' (lines %d to %d)",
                               blocks[i].lineno, blocks[j].lineno)
+                if start_dir == "elif":
+                    # Put an endif since we started with an elif.
+                    result += blocks[j:j+1]
                 i = j + 1
             elif dir_ == "else":
                 # convert 'else' into 'if 1'
                 logging.debug("convert 'if 0' .. 'else' into 'if 1' (lines %d "
                               "to %d)", blocks[i].lineno, blocks[j-1].lineno)
-                blocks[j].directive = "if"
+                if start_dir == "elif":
+                    blocks[j].directive = "elif"
+                else:
+                    blocks[j].directive = "if"
                 blocks[j].expr = CppExpr(CppStringTokenizer("1").tokens)
                 i = j
             elif dir_ == "elif":
                 # convert 'elif' into 'if'
                 logging.debug("convert 'if 0' .. 'elif' into 'if'")
-                blocks[j].directive = "if"
+                if start_dir == "elif":
+                    blocks[j].directive = "elif"
+                else:
+                    blocks[j].directive = "if"
                 i = j
             continue
 
@@ -1721,18 +1798,33 @@ def optimize_if01(blocks):
             result += blocks[j+1:k]
             break
 
+        start_dir = blocks[j].directive
         dir_ = blocks[k].directive
         if dir_ == "endif":
             logging.debug("convert 'if 1' .. 'endif' (lines %d to %d)",
                           blocks[j].lineno, blocks[k].lineno)
+            if start_dir == "elif":
+                # Add the elif in to the results and convert it to an elif 1.
+                blocks[j].tokens = CppStringTokenizer("1").tokens
+                result += blocks[j:j+1]
             result += optimize_if01(blocks[j+1:k])
+            if start_dir == "elif":
+                # Add the endif in to the results.
+                result += blocks[k:k+1]
             i = k + 1
         elif dir_ == "else":
             # convert 'else' into 'if 0'
             logging.debug("convert 'if 1' .. 'else' (lines %d to %d)",
                           blocks[j].lineno, blocks[k].lineno)
+            if start_dir == "elif":
+                # Add the elif in to the results and convert it to an elif 1.
+                blocks[j].tokens = CppStringTokenizer("1").tokens
+                result += blocks[j:j+1]
             result += optimize_if01(blocks[j+1:k])
-            blocks[k].directive = "if"
+            if start_dir == "elif":
+                blocks[k].directive = "elif"
+            else:
+                blocks[k].directive = "if"
             blocks[k].expr = CppExpr(CppStringTokenizer("0").tokens)
             i = k
         elif dir_ == "elif":
@@ -1744,85 +1836,831 @@ def optimize_if01(blocks):
             i = k
     return result
 
+class OptimizerTests(unittest.TestCase):
+    def parse(self, text, macros=None):
+        out = utils.StringOutput()
+        blocks = BlockParser().parse(CppStringTokenizer(text))
+        blocks.optimizeAll(macros)
+        blocks.write(out)
+        return out.get()
 
-def test_optimizeAll():
-    text = """\
+    def test_if1(self):
+        text = """\
 #if 1
-#define  GOOD_1
+#define  GOOD
 #endif
-#if 0
-#define  BAD_2
-#define  BAD_3
-#endif
+"""
+        expected = """\
+#define GOOD
+"""
+        self.assertEqual(self.parse(text), expected)
 
+    def test_if0(self):
+        text = """\
+#if 0
+#define  SHOULD_SKIP1
+#define  SHOULD_SKIP2
+#endif
+"""
+        expected = ""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_if1_else(self):
+        text = """\
 #if 1
-#define  GOOD_2
+#define  GOOD
 #else
-#define  BAD_4
+#define  BAD
 #endif
+"""
+        expected = """\
+#define GOOD
+"""
+        self.assertEqual(self.parse(text), expected)
 
+    def test_if0_else(self):
+        text = """\
 #if 0
-#define  BAD_5
+#define  BAD
 #else
-#define  GOOD_3
+#define  GOOD
 #endif
+"""
+        expected = """\
+#define GOOD
+"""
+        self.assertEqual(self.parse(text), expected)
 
+    def test_if_elif1(self):
+        text = """\
+#if defined(something)
+#define EXISTS
+#elif 1
+#define GOOD
+#endif
+"""
+        expected = """\
+#ifdef something
+#define EXISTS
+#elif 1
+#define GOOD
+#endif
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_if_elif1_macro(self):
+        text = """\
+#if defined(something)
+#define EXISTS
+#elif defined(WILL_BE_ONE)
+#define GOOD
+#endif
+"""
+        expected = """\
+#ifdef something
+#define EXISTS
+#elif 1
+#define GOOD
+#endif
+"""
+        self.assertEqual(self.parse(text, {"WILL_BE_ONE": "1"}), expected)
+
+
+    def test_if_elif1_else(self):
+        text = """\
+#if defined(something)
+#define EXISTS
+#elif 1
+#define GOOD
+#else
+#define BAD
+#endif
+"""
+        expected = """\
+#ifdef something
+#define EXISTS
+#elif 1
+#define GOOD
+#endif
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_if_elif1_else_macro(self):
+        text = """\
+#if defined(something)
+#define EXISTS
+#elif defined(WILL_BE_ONE)
+#define GOOD
+#else
+#define BAD
+#endif
+"""
+        expected = """\
+#ifdef something
+#define EXISTS
+#elif 1
+#define GOOD
+#endif
+"""
+        self.assertEqual(self.parse(text, {"WILL_BE_ONE": "1"}), expected)
+
+
+    def test_if_elif1_else_macro(self):
+        text = """\
+#if defined(something)
+#define EXISTS
+#elif defined(WILL_BE_ONE)
+#define GOOD
+#else
+#define BAD
+#endif
+"""
+        expected = """\
+#ifdef something
+#define EXISTS
+#elif 1
+#define GOOD
+#endif
+"""
+        self.assertEqual(self.parse(text, {"WILL_BE_ONE": "1"}), expected)
+
+    def test_macro_set_to_undefined_single(self):
+        text = """\
 #if defined(__KERNEL__)
 #define BAD_KERNEL
 #endif
+"""
+        expected = ""
+        macros = {"__KERNEL__": kCppUndefinedMacro}
+        self.assertEqual(self.parse(text, macros), expected)
 
+    def test_macro_set_to_undefined_if(self):
+        text = """\
 #if defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2)
-#define X
+#define CHECK
 #endif
+"""
+        expected = """\
+#if !defined(__GLIBC__) || __GLIBC__ < 2
+#define CHECK
+#endif
+"""
+        macros = {"__KERNEL__": kCppUndefinedMacro}
+        self.assertEqual(self.parse(text, macros), expected)
 
+    def test_endif_comment_removed(self):
+        text = """\
 #ifndef SIGRTMAX
 #define SIGRTMAX 123
 #endif /* SIGRTMAX */
+"""
+        expected = """\
+#ifndef SIGRTMAX
+#define SIGRTMAX 123
+#endif
+"""
+        self.assertEqual(self.parse(text), expected)
 
+    def test_multilevel_if0(self):
+        text = """\
 #if 0
 #if 1
 #define  BAD_6
 #endif
-#endif\
-"""
-
-    expected = """\
-#define GOOD_1
-#define GOOD_2
-#define GOOD_3
-#if !defined(__GLIBC__) || __GLIBC__ < 2
-#define X
 #endif
-#ifndef __SIGRTMAX
-#define __SIGRTMAX 123
-#endif\
+"""
+        expected = ""
+        self.assertEqual(self.parse(text), expected)
+
+class RemoveStructsTests(unittest.TestCase):
+    def parse(self, text, structs):
+        out = utils.StringOutput()
+        blocks = BlockParser().parse(CppStringTokenizer(text))
+        blocks.removeStructs(structs)
+        blocks.write(out)
+        return out.get()
+
+    def test_remove_struct_from_start(self):
+        text = """\
+struct remove {
+  int val1;
+  int val2;
+};
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        expected = """\
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove": None}), expected)
+
+    def test_remove_struct_from_end(self):
+        text = """\
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+struct remove {
+  int val1;
+  int val2;
+};
+"""
+        expected = """\
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove": None}), expected)
+
+    def test_remove_minimal_struct(self):
+        text = """\
+struct remove {
+};
+"""
+        expected = "";
+        self.assertEqual(self.parse(text, {"remove": None}), expected)
+
+    def test_remove_struct_with_struct_fields(self):
+        text = """\
+struct something {
+  struct remove val1;
+  struct remove val2;
+};
+struct remove {
+  int val1;
+  struct something val3;
+  int val2;
+};
+"""
+        expected = """\
+struct something {
+  struct remove val1;
+  struct remove val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove": None}), expected)
+
+    def test_remove_consecutive_structs(self):
+        text = """\
+struct keep1 {
+  struct timeval val1;
+  struct timeval val2;
+};
+struct remove1 {
+  int val1;
+  int val2;
+};
+struct remove2 {
+  int val1;
+  int val2;
+  int val3;
+};
+struct keep2 {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        expected = """\
+struct keep1 {
+  struct timeval val1;
+  struct timeval val2;
+};
+struct keep2 {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove1": None, "remove2": None}), expected)
+
+    def test_remove_multiple_structs(self):
+        text = """\
+struct keep1 {
+  int val;
+};
+struct remove1 {
+  int val1;
+  int val2;
+};
+struct keep2 {
+  int val;
+};
+struct remove2 {
+  struct timeval val1;
+  struct timeval val2;
+};
+struct keep3 {
+  int val;
+};
+"""
+        expected = """\
+struct keep1 {
+  int val;
+};
+struct keep2 {
+  int val;
+};
+struct keep3 {
+  int val;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove1": None, "remove2": None}), expected)
+
+    def test_remove_struct_with_inline_structs(self):
+        text = """\
+struct remove {
+  int val1;
+  int val2;
+  struct {
+    int val1;
+    struct {
+      int val1;
+    } level2;
+  } level1;
+};
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        expected = """\
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove": None}), expected)
+
+    def test_remove_struct_across_blocks(self):
+        text = """\
+struct remove {
+  int val1;
+  int val2;
+#ifdef PARAMETER1
+  PARAMETER1
+#endif
+#ifdef PARAMETER2
+  PARAMETER2
+#endif
+};
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        expected = """\
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove": None}), expected)
+
+    def test_remove_struct_across_blocks_multiple_structs(self):
+        text = """\
+struct remove1 {
+  int val1;
+  int val2;
+#ifdef PARAMETER1
+  PARAMETER1
+#endif
+#ifdef PARAMETER2
+  PARAMETER2
+#endif
+};
+struct remove2 {
+};
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        expected = """\
+struct something {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        self.assertEqual(self.parse(text, {"remove1": None, "remove2": None}), expected)
+
+    def test_remove_multiple_struct_and_add_includes(self):
+        text = """\
+struct remove1 {
+  int val1;
+  int val2;
+};
+struct remove2 {
+  struct timeval val1;
+  struct timeval val2;
+};
+"""
+        expected = """\
+#include <bits/remove1.h>
+#include <bits/remove2.h>
+"""
+        self.assertEqual(self.parse(text, {"remove1": "bits/remove1.h", "remove2": "bits/remove2.h"}), expected)
+
+
+class FullPathTest(unittest.TestCase):
+    """Test of the full path parsing."""
+
+    def parse(self, text, keep=None):
+        if not keep:
+            keep = set()
+        out = utils.StringOutput()
+        blocks = BlockParser().parse(CppStringTokenizer(text))
+
+        blocks.removeStructs(kernel_structs_to_remove)
+        blocks.removeVarsAndFuncs(keep)
+        blocks.replaceTokens(kernel_token_replacements)
+        blocks.optimizeAll(None)
+
+        blocks.write(out)
+        return out.get()
+
+    def test_function_removed(self):
+        text = """\
+static inline __u64 function()
+{
+}
+"""
+        expected = ""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_function_removed_with_struct(self):
+        text = """\
+static inline struct something* function()
+{
+}
+"""
+        expected = ""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_function_kept(self):
+        text = """\
+static inline __u64 function()
+{
+}
+"""
+        expected = """\
+static inline __u64 function() {
+}
+"""
+        self.assertEqual(self.parse(text, set(["function"])), expected)
+
+    def test_var_removed(self):
+        text = "__u64 variable;"
+        expected = ""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_var_kept(self):
+        text = "__u64 variable;"
+        expected = "__u64 variable;\n"
+        self.assertEqual(self.parse(text, set(["variable"])), expected)
+
+    def test_keep_function_typedef(self):
+        text = "typedef void somefunction_t(void);"
+        expected = "typedef void somefunction_t(void);\n"
+        self.assertEqual(self.parse(text), expected)
+
+    def test_struct_keep_attribute(self):
+        text = """\
+struct something_s {
+  __u32 s1;
+  __u32 s2;
+} __attribute__((packed));
+"""
+        expected = """\
+struct something_s {
+  __u32 s1;
+  __u32 s2;
+} __attribute__((packed));
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_function_keep_attribute_structs(self):
+        text = """\
+static __inline__ struct some_struct1 * function(struct some_struct2 * e) {
+}
+"""
+        expected = """\
+static __inline__ struct some_struct1 * function(struct some_struct2 * e) {
+}
+"""
+        self.assertEqual(self.parse(text, set(["function"])), expected)
+
+    def test_struct_after_struct(self):
+        text = """\
+struct first {
+};
+
+struct second {
+  unsigned short s1;
+#define SOMETHING 8
+  unsigned short s2;
+};
+"""
+        expected = """\
+struct first {
+};
+struct second {
+  unsigned short s1;
+#define SOMETHING 8
+  unsigned short s2;
+};
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_other_not_removed(self):
+        text = """\
+typedef union {
+  __u64 tu1;
+  __u64 tu2;
+} typedef_name;
+
+union {
+  __u64 u1;
+  __u64 u2;
+};
+
+struct {
+  __u64 s1;
+  __u64 s2;
+};
+
+enum {
+  ENUM1 = 0,
+  ENUM2,
+};
+
+__extension__ typedef __signed__ long long __s64;
+"""
+        expected = """\
+typedef union {
+  __u64 tu1;
+  __u64 tu2;
+} typedef_name;
+union {
+  __u64 u1;
+  __u64 u2;
+};
+struct {
+  __u64 s1;
+  __u64 s2;
+};
+enum {
+  ENUM1 = 0,
+  ENUM2,
+};
+__extension__ typedef __signed__ long long __s64;
 """
 
-    out = utils.StringOutput()
-    blocks = BlockParser().parse(CppStringTokenizer(text))
-    blocks.replaceTokens(kernel_token_replacements)
-    blocks.optimizeAll({"__KERNEL__": kCppUndefinedMacro})
-    blocks.write(out)
-    if out.get() != expected:
-        print "[FAIL]: macro optimization failed\n"
-        print "<<<< expecting '",
-        print expected,
-        print "'\n>>>> result '",
-        print out.get(),
-        print "'\n----"
-        global failure_count
-        failure_count += 1
+        self.assertEqual(self.parse(text), expected)
+
+    def test_semicolon_after_function(self):
+        text = """\
+static inline __u64 function()
+{
+};
+
+struct should_see {
+        __u32                           field;
+};
+"""
+        expected = """\
+struct should_see {
+  __u32 field;
+};
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_define_in_middle_keep(self):
+        text = """\
+enum {
+  ENUM0 = 0x10,
+  ENUM1 = 0x20,
+#define SOMETHING SOMETHING_ELSE
+  ENUM2 = 0x40,
+};
+"""
+        expected = """\
+enum {
+  ENUM0 = 0x10,
+  ENUM1 = 0x20,
+#define SOMETHING SOMETHING_ELSE
+  ENUM2 = 0x40,
+};
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_define_in_middle_remove(self):
+        text = """\
+static inline function() {
+#define SOMETHING1 SOMETHING_ELSE1
+  i = 0;
+  {
+    i = 1;
+  }
+#define SOMETHING2 SOMETHING_ELSE2
+}
+"""
+        expected = """\
+#define SOMETHING1 SOMETHING_ELSE1
+#define SOMETHING2 SOMETHING_ELSE2
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_define_in_middle_force_keep(self):
+        text = """\
+static inline function() {
+#define SOMETHING1 SOMETHING_ELSE1
+  i = 0;
+  {
+    i = 1;
+  }
+#define SOMETHING2 SOMETHING_ELSE2
+}
+"""
+        expected = """\
+static inline function() {
+#define SOMETHING1 SOMETHING_ELSE1
+  i = 0;
+ {
+    i = 1;
+  }
+#define SOMETHING2 SOMETHING_ELSE2
+}
+"""
+        self.assertEqual(self.parse(text, set(["function"])), expected)
+
+    def test_define_before_remove(self):
+        text = """\
+#define SHOULD_BE_KEPT NOTHING1
+#define ANOTHER_TO_KEEP NOTHING2
+static inline function() {
+#define SOMETHING1 SOMETHING_ELSE1
+  i = 0;
+  {
+    i = 1;
+  }
+#define SOMETHING2 SOMETHING_ELSE2
+}
+"""
+        expected = """\
+#define SHOULD_BE_KEPT NOTHING1
+#define ANOTHER_TO_KEEP NOTHING2
+#define SOMETHING1 SOMETHING_ELSE1
+#define SOMETHING2 SOMETHING_ELSE2
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_extern_C(self):
+        text = """\
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+struct something {
+};
+
+#if defined(__cplusplus)
+}
+#endif
+"""
+        expected = """\
+#ifdef __cplusplus
+extern "C" {
+#endif
+struct something {
+};
+#ifdef __cplusplus
+}
+#endif
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_macro_definition_removed(self):
+        text = """\
+#define MACRO_FUNCTION_NO_PARAMS static inline some_func() {}
+MACRO_FUNCTION_NO_PARAMS()
+
+#define MACRO_FUNCTION_PARAMS(a) static inline some_func() { a; }
+MACRO_FUNCTION_PARAMS(a = 1)
+
+something that should still be kept
+MACRO_FUNCTION_PARAMS(b)
+"""
+        expected = """\
+#define MACRO_FUNCTION_NO_PARAMS static inline some_func() { }
+#define MACRO_FUNCTION_PARAMS(a) static inline some_func() { a; }
+something that should still be kept
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_verify_timeval_itemerval(self):
+        text = """\
+struct __kernel_old_timeval {
+  struct something val;
+};
+struct __kernel_old_itimerval {
+  struct __kernel_old_timeval val;
+};
+struct fields {
+  struct __kernel_old_timeval timeval;
+  struct __kernel_old_itimerval itimerval;
+};
+"""
+        expected = """\
+struct fields {
+  struct timeval timeval;
+  struct itimerval itimerval;
+};
+#include <linux/time.h>
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_var_definition(self):
+        # If we're definining the whole thing, it's probably worth keeping.
+        text = """\
+static const char *kString = "hello world";
+static const int kInteger = 42;
+"""
+        expected = """\
+static const char * kString = "hello world";
+static const int kInteger = 42;
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_struct_array_definition(self):
+        text = """\
+struct descriptor {
+  int args;
+  int size;
+};
+static const struct descriptor[] = {
+  {0, 0},
+  {1, 12},
+  {0, 42},
+};
+"""
+        expected = """\
+struct descriptor {
+  int args;
+  int size;
+};
+static const struct descriptor[] = {
+ {
+    0, 0
+  }
+ , {
+    1, 12
+  }
+ , {
+    0, 42
+  }
+ ,
+};
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_array_definition(self):
+        text = """\
+static const char *arr[] = {
+  "foo",
+  "bar",
+  "baz",
+};
+
+static int another_arr[5] = { 1, 2, 3, 4, 5};
+"""
+        expected = """\
+static const char * arr[] = {
+  "foo", "bar", "baz",
+};
+static int another_arr[5] = {
+  1, 2, 3, 4, 5
+};
+"""
+        self.assertEqual(self.parse(text), expected)
+
+    def test_token_replacement(self):
+        text = """\
+#define SIGRTMIN 32
+#define SIGRTMAX _NSIG
+#define SIGRTMAX(a,class) some_func(a, class)
+"""
+        expected = """\
+#define __SIGRTMIN 32
+#define __SIGRTMAX _KERNEL__NSIG
+#define __SIGRTMAX(a,__linux_class) some_func(a, __linux_class)
+"""
+        self.assertEqual(self.parse(text), expected)
 
 
-def runUnitTests():
-    """Always run all unit tests for this program."""
-    test_CppTokenizer()
-    test_CppExpr()
-    test_optimizeAll()
-    test_BlockParser()
-
-
-failure_count = 0
-runUnitTests()
-if failure_count != 0:
-    utils.panic("Unit tests failed in cpp.py.\n")
+if __name__ == '__main__':
+    unittest.main()

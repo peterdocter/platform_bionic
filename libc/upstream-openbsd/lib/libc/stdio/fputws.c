@@ -1,4 +1,4 @@
-/*	$OpenBSD: fputws.c,v 1.7 2013/11/12 07:04:35 deraadt Exp $	*/
+/*	$OpenBSD: fputws.c,v 1.9 2021/10/24 10:05:23 jsg Exp $	*/
 /* $NetBSD: fputws.c,v 1.1 2003/03/07 07:11:37 tshiozak Exp $ */
 
 /*-
@@ -37,9 +37,7 @@
 #include "fvwrite.h"
 
 int
-fputws(ws, fp)
-	const wchar_t * __restrict ws;
-	FILE * __restrict fp;
+fputws(const wchar_t * __restrict ws, FILE * __restrict fp)
 {
 	FLOCKFILE(fp);
 	_SET_ORIENTATION(fp, 1);
@@ -55,3 +53,4 @@ fputws(ws, fp)
 
 	return (0);
 }
+DEF_STRONG(fputws);

@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2011 David Schultz <das@FreeBSD.ORG>
  * All rights reserved.
  *
@@ -23,9 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/k_expf.c 275819 2014-12-16 09:21:56Z ed $");
 
 #include <complex.h>
 
@@ -69,7 +68,7 @@ __ldexp_expf(float x, int expt)
 float complex
 __ldexp_cexpf(float complex z, int expt)
 {
-	float x, y, exp_x, scale1, scale2;
+	float c, exp_x, s, scale1, scale2, x, y;
 	int ex_expt, half_expt;
 
 	x = crealf(z);
@@ -82,6 +81,7 @@ __ldexp_cexpf(float complex z, int expt)
 	half_expt = expt - half_expt;
 	SET_FLOAT_WORD(scale2, (0x7f + half_expt) << 23);
 
-	return (CMPLXF(cosf(y) * exp_x * scale1 * scale2,
-	    sinf(y) * exp_x * scale1 * scale2));
+	sincosf(y, &s, &c);
+	return (CMPLXF(c * exp_x * scale1 * scale2,
+	    s * exp_x * scale1 * scale2));
 }

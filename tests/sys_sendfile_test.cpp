@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-#include <gtest/gtest.h>
-#include "TemporaryFile.h"
 
-#include <sys/sendfile.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#include <android-base/file.h>
+#include <gtest/gtest.h>
 
 TEST(sys_sendfile, sendfile) {
   TemporaryFile src_file;
@@ -42,7 +43,7 @@ TEST(sys_sendfile, sendfile) {
   ASSERT_STREQ("ll", buf);
 }
 
-TEST(sys_sendfile, sendfile64) {
+TEST(sys_sendfile, sendfile64_smoke) {
   TemporaryFile src_file;
   ASSERT_EQ(5, TEMP_FAILURE_RETRY(write(src_file.fd, "hello", 5)));
 

@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2008 David Schultz <das@FreeBSD.ORG>
  * All rights reserved.
  *
@@ -24,10 +26,8 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/s_cproj.c 275819 2014-12-16 09:21:56Z ed $");
-
 #include <complex.h>
+#include <float.h>
 #include <math.h>
 
 #include "math_private.h"

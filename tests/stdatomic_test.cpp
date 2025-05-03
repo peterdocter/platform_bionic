@@ -15,9 +15,16 @@
  */
 
 #include <gtest/gtest.h>
-// Fool stdatomic.h into not using <atomic>.
-#undef _USING_LIBCXX
-#include <stdatomic.h>
+
+// The real <stdatomic.h> checks for the availability of C++'s <atomic> and
+// uses that instead if present.
+// We want to test the C interfaces, so we instead include
+// <bits/stdatomic.h> directly.
+// This doesn't entirely work because gtest also (transitively) pulls in <atomic>.
+// It's not clear there's a good fix for this,
+// other than switching to a non-C++ unit test framework for bionic.
+#include <bits/stdatomic.h>
+
 #include <pthread.h>
 #include <stdint.h>
 
@@ -35,10 +42,20 @@ TEST(stdatomic, LOCK_FREE) {
 }
 
 TEST(stdatomic, init) {
+  // ATOMIC_VAR_INIT has been removed from C23,
+  // but is still in POSIX 2024.
+  // Even if it is removed from there,
+  // we should probably keep it indefinitely for source compatibility.
+  // libc++'s <atomic> (which we can't entirely avoid: see above)
+  // marks the macro deprecated,
+  // so we need to silence that.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-pragma"
   atomic_int v = ATOMIC_VAR_INIT(123);
   ASSERT_EQ(123, atomic_load(&v));
+#pragma clang diagnostic pop
 
-  atomic_init(&v, 456);
+  atomic_store_explicit(&v, 456, memory_order_relaxed);
   ASSERT_EQ(456, atomic_load(&v));
 
   atomic_flag f = ATOMIC_FLAG_INIT;
@@ -66,16 +83,8 @@ TEST(stdatomic, atomic_signal_fence) {
 TEST(stdatomic, atomic_is_lock_free) {
   atomic_char small;
   ASSERT_TRUE(atomic_is_lock_free(&small));
-#if defined(__clang__) || __GNUC_PREREQ(4, 7)
-  // Otherwise stdatomic.h doesn't handle this.
   atomic_intmax_t big;
-  // atomic_intmax_t(size = 64) is not lock free on mips32.
-#if defined(__mips__) && !defined(__LP64__)
-  ASSERT_FALSE(atomic_is_lock_free(&big));
-#else
   ASSERT_TRUE(atomic_is_lock_free(&big));
-#endif
-#endif
 }
 
 TEST(stdatomic, atomic_flag) {
@@ -119,53 +128,67 @@ TEST(stdatomic, atomic_compare_exchange) {
 
   atomic_store(&i, 123);
   expected = 123;
-  ASSERT_TRUE(atomic_compare_exchange_strong_explicit(&i, &expected, 456, memory_order_relaxed, memory_order_relaxed));
-  ASSERT_FALSE(atomic_compare_exchange_strong_explicit(&i, &expected, 456, memory_order_relaxed, memory_order_relaxed));
+  ASSERT_TRUE(atomic_compare_exchange_strong_explicit(&i, &expected, 456, memory_order_relaxed,
+          memory_order_relaxed));
+  ASSERT_FALSE(atomic_compare_exchange_strong_explicit(&i, &expected, 456, memory_order_relaxed,
+          memory_order_relaxed));
   ASSERT_EQ(456, expected);
 
   atomic_store(&i, 123);
   expected = 123;
-  ASSERT_TRUE(atomic_compare_exchange_weak(&i, &expected, 456));
+  int iter_count = 0;
+  do {
+    ++iter_count;
+    ASSERT_LT(iter_count, 100);  // Arbitrary limit on spurious compare_exchange failures.
+    ASSERT_EQ(expected, 123);
+  } while(!atomic_compare_exchange_weak(&i, &expected, 456));
   ASSERT_FALSE(atomic_compare_exchange_weak(&i, &expected, 456));
   ASSERT_EQ(456, expected);
 
   atomic_store(&i, 123);
   expected = 123;
-  ASSERT_TRUE(atomic_compare_exchange_weak_explicit(&i, &expected, 456, memory_order_relaxed, memory_order_relaxed));
-  ASSERT_FALSE(atomic_compare_exchange_weak_explicit(&i, &expected, 456, memory_order_relaxed, memory_order_relaxed));
+  iter_count = 0;
+  do {
+    ++iter_count;
+    ASSERT_LT(iter_count, 100);
+    ASSERT_EQ(expected, 123);
+  } while(!atomic_compare_exchange_weak_explicit(&i, &expected, 456, memory_order_relaxed,
+          memory_order_relaxed));
+  ASSERT_FALSE(atomic_compare_exchange_weak_explicit(&i, &expected, 456, memory_order_relaxed,
+          memory_order_relaxed));
   ASSERT_EQ(456, expected);
 }
 
 TEST(stdatomic, atomic_fetch_add) {
-  atomic_int i = ATOMIC_VAR_INIT(123);
+  atomic_int i = 123;
   ASSERT_EQ(123, atomic_fetch_add(&i, 1));
   ASSERT_EQ(124, atomic_fetch_add_explicit(&i, 1, memory_order_relaxed));
   ASSERT_EQ(125, atomic_load(&i));
 }
 
 TEST(stdatomic, atomic_fetch_sub) {
-  atomic_int i = ATOMIC_VAR_INIT(123);
+  atomic_int i = 123;
   ASSERT_EQ(123, atomic_fetch_sub(&i, 1));
   ASSERT_EQ(122, atomic_fetch_sub_explicit(&i, 1, memory_order_relaxed));
   ASSERT_EQ(121, atomic_load(&i));
 }
 
 TEST(stdatomic, atomic_fetch_or) {
-  atomic_int i = ATOMIC_VAR_INIT(0x100);
+  atomic_int i = 0x100;
   ASSERT_EQ(0x100, atomic_fetch_or(&i, 0x020));
   ASSERT_EQ(0x120, atomic_fetch_or_explicit(&i, 0x003, memory_order_relaxed));
   ASSERT_EQ(0x123, atomic_load(&i));
 }
 
 TEST(stdatomic, atomic_fetch_xor) {
-  atomic_int i = ATOMIC_VAR_INIT(0x100);
+  atomic_int i = 0x100;
   ASSERT_EQ(0x100, atomic_fetch_xor(&i, 0x120));
   ASSERT_EQ(0x020, atomic_fetch_xor_explicit(&i, 0x103, memory_order_relaxed));
   ASSERT_EQ(0x123, atomic_load(&i));
 }
 
 TEST(stdatomic, atomic_fetch_and) {
-  atomic_int i = ATOMIC_VAR_INIT(0x123);
+  atomic_int i = 0x123;
   ASSERT_EQ(0x123, atomic_fetch_and(&i, 0x00f));
   ASSERT_EQ(0x003, atomic_fetch_and_explicit(&i, 0x2, memory_order_relaxed));
   ASSERT_EQ(0x002, atomic_load(&i));
@@ -173,7 +196,8 @@ TEST(stdatomic, atomic_fetch_and) {
 
 // And a rudimentary test of acquire-release memory ordering:
 
-constexpr static uint_least32_t BIG = 10000000ul; // Assumed even below.
+static constexpr uint_least32_t BIG = 30'000'000ul;
+static_assert((BIG % 2) == 0);  // Assumed below.
 
 struct three_atomics {
   atomic_uint_least32_t x;
@@ -184,18 +208,29 @@ struct three_atomics {
   atomic_uint_least32_t z;
 };
 
-// Very simple acquire/release memory ordering sanity check.
+atomic_bool read_enough(false);
+
+// Very simple acquire/release memory ordering smoke test.
 static void* writer(void* arg) {
   three_atomics* a = reinterpret_cast<three_atomics*>(arg);
   for (uint_least32_t i = 0; i <= BIG; i+=2) {
     atomic_store_explicit(&a->x, i, memory_order_relaxed);
     atomic_store_explicit(&a->z, i, memory_order_relaxed);
     atomic_store_explicit(&a->y, i, memory_order_release);
+
+    // Force stores to be visible in spite of being overwritten below.
+    asm volatile("" ::: "memory");
+
     atomic_store_explicit(&a->x, i+1, memory_order_relaxed);
     atomic_store_explicit(&a->z, i+1, memory_order_relaxed);
     atomic_store_explicit(&a->y, i+1, memory_order_release);
+    if (i >= BIG - 1000 && !atomic_load(&read_enough)) {
+      // Give reader a chance to catch up, at the expense of making the test
+      // less effective.
+      usleep(1000);
+    }
   }
-  return 0;
+  return nullptr;
 }
 
 static void* reader(void* arg) {
@@ -213,37 +248,41 @@ static void* reader(void* arg) {
       // Cant just ASSERT, since we are in a non-void function.
       ADD_FAILURE() << "acquire-release ordering violation: "
                     << zval << " < " << yval << ", " << xval << "\n";
-      return 0; // Only report once.
+      return nullptr; // Only report once.
     }
     if (xval < yval) {
       // Cant just ASSERT, since we are in a non-void function.
       ADD_FAILURE() << "acquire-release ordering violation: "
                     << xval << " < " << yval << ", " << zval <<  "\n";
-      return 0; // Only report once.
+      return nullptr; // Only report once.
     }
-    if (repeat < repeat_limit) ++repeat;
+    if (repeat < repeat_limit) {
+      ++repeat;
+    } else if (!atomic_load_explicit(&read_enough, memory_order_relaxed)) {
+      atomic_store_explicit(&read_enough, true, memory_order_relaxed);
+    }
   }
   // The following assertion is not technically guaranteed to hold.
   // But if it fails to hold, this test was useless, and we have a
   // serious scheduling issue that we should probably know about.
   EXPECT_EQ(repeat, repeat_limit);
-  return 0;
+  return nullptr;
 }
 
 TEST(stdatomic, ordering) {
-  // Run a memory ordering sanity test.
+  // Run a memory ordering smoke test.
   void* result;
   three_atomics a;
-  atomic_init(&a.x, 0ul);
-  atomic_init(&a.y, 0ul);
-  atomic_init(&a.z, 0ul);
+  atomic_store_explicit(&a.x, 0ul, memory_order_relaxed);
+  atomic_store_explicit(&a.y, 0ul, memory_order_relaxed);
+  atomic_store_explicit(&a.z, 0ul, memory_order_relaxed);
   pthread_t t1,t2;
-  ASSERT_EQ(0, pthread_create(&t1, 0, reader, &a));
-  ASSERT_EQ(0, pthread_create(&t2, 0, writer, &a));
+  ASSERT_EQ(0, pthread_create(&t1, nullptr, reader, &a));
+  ASSERT_EQ(0, pthread_create(&t2, nullptr, writer, &a));
   ASSERT_EQ(0, pthread_join(t1, &result));
-  EXPECT_EQ(0, result);
+  EXPECT_EQ(nullptr, result);
   ASSERT_EQ(0, pthread_join(t2, &result));
-  EXPECT_EQ(0, result);
+  EXPECT_EQ(nullptr, result);
   EXPECT_EQ(atomic_load_explicit(&a.x, memory_order_consume), BIG + 1);
   EXPECT_EQ(atomic_load_explicit(&a.y, memory_order_seq_cst), BIG + 1);
   EXPECT_EQ(atomic_load(&a.z), BIG + 1);

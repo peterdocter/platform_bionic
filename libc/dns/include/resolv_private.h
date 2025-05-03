@@ -51,17 +51,18 @@
  *	Id: resolv.h,v 1.7.2.11.4.2 2004/06/25 00:41:05 marka Exp
  */
 
-#ifndef _RESOLV_PRIVATE_H_
-#define	_RESOLV_PRIVATE_H_
+#pragma once
 
 #include <sys/cdefs.h>
 
 #include <resolv.h>
 #include "resolv_static.h"
+#include "resolv_params.h"
+#include "resolv_stats.h"
 #include <net/if.h>
+#include <time.h>
 
-/* Despite this file's name, it's part of libresolv. On Android, that means it's part of libc :-( */
-#pragma GCC visibility push(default)
+__BEGIN_DECLS
 
 // Linux defines MAXHOSTNAMELEN as 64, while the domain name limit in
 // RFC 1034 and RFC 1035 is 255 octets.
@@ -116,17 +117,6 @@ struct __res_state; /* forward */
 #endif
 #endif
 
-typedef enum { res_goahead, res_nextns, res_modified, res_done, res_error }
-	res_sendhookact;
-
-typedef res_sendhookact (*res_send_qhook)(struct sockaddr * const *,
-					      const u_char **, int *,
-					      u_char *, int, int *);
-
-typedef res_sendhookact (*res_send_rhook)(const struct sockaddr *,
-					      const u_char *, int, u_char *,
-					      int, int *);
-
 struct res_sym {
 	int		number;	   /* Identifying number, like T_MX */
 	const char *	name;	   /* Its symbolic name, like "MX" */
@@ -136,9 +126,7 @@ struct res_sym {
 /*
  * Global defines and variables for resolver stub.
  */
-#define	MAXNS			3	/* max # name servers we'll track */
 #define	MAXDFLSRCH		3	/* # default domain levels to try */
-#define	MAXDNSRCH		6	/* max # domains in search path */
 #define	LOCALDOMAINPARTS	2	/* min levels in name that is "local" */
 
 #define	RES_TIMEOUT		5	/* min. seconds between retries */
@@ -204,6 +192,24 @@ struct __res_state {
 };
 
 typedef struct __res_state *res_state;
+
+/* Retrieve a local copy of the stats for the given netid. The buffer must have space for
+ * MAXNS __resolver_stats. Returns the revision id of the resolvers used.
+ */
+__LIBC_HIDDEN__
+extern int
+_resolv_cache_get_resolver_stats( unsigned netid, struct __res_params* params,
+        struct __res_stats stats[MAXNS]);
+
+/* Add a sample to the shared struct for the given netid and server, provided that the
+ * revision_id of the stored servers has not changed.
+ */
+__LIBC_HIDDEN__
+extern void
+_resolv_cache_add_resolver_stats_sample( unsigned netid, int revision_id, int ns,
+        const struct __res_sample* sample, int max_samples);
+
+/* End of stats related definitions */
 
 union res_sockaddr_union {
 	struct sockaddr_in	sin;
@@ -288,8 +294,6 @@ union res_sockaddr_union {
 /*			0x00010000	*/
 
 /* Things involving an internal (static) resolver context. */
-__BEGIN_DECLS
-
 __LIBC_HIDDEN__ extern struct __res_state *__res_get_state(void);
 __LIBC_HIDDEN__ extern void __res_put_state(struct __res_state *);
 
@@ -302,8 +306,6 @@ extern struct __res_state *__res_state(void);
 #define _res (*__res_state())
 #endif
 
-__END_DECLS
-
 #ifndef __BIND_NOSTATIC
 #define fp_nquery		__fp_nquery
 #define fp_query		__fp_query
@@ -314,7 +316,6 @@ __END_DECLS
 #define res_isourserver		__res_isourserver
 #define	res_querydomain		__res_querydomain
 #define res_send		__res_send
-#define res_sendsigned		__res_sendsigned
 
 #ifdef BIND_RES_POSIX3
 #define	dn_expand	__dn_expand
@@ -324,7 +325,6 @@ __END_DECLS
 #define	res_mkquery	__res_mkquery
 #endif
 
-__BEGIN_DECLS
 void		fp_nquery(const u_char *, int, FILE *);
 void		fp_query(const u_char *, FILE *);
 const char *	hostalias(const char *);
@@ -338,8 +338,6 @@ int		res_query(const char *, int, int, u_char *, int);
 int		res_querydomain(const char *, const char *, int, int, u_char *, int);
 int		res_search(const char *, int, int, u_char *, int);
 int		res_send(const u_char *, int, u_char *, int);
-int		res_sendsigned(const u_char *, int, ns_tsig_key *, u_char *, int);
-__END_DECLS
 #endif
 
 #if !defined(SHARED_LIBBIND) || defined(LIB)
@@ -398,7 +396,6 @@ __LIBC_HIDDEN__ extern const struct res_sym __p_rcode_syms[];
 #define res_nisourserver	__res_nisourserver
 #define res_ownok		__res_ownok
 #define res_queriesmatch	__res_queriesmatch
-#define res_randomid		__res_randomid
 #define sym_ntop		__sym_ntop
 #define sym_ntos		__sym_ntos
 #define sym_ston		__sym_ston
@@ -420,7 +417,6 @@ __LIBC_HIDDEN__ extern const struct res_sym __p_rcode_syms[];
 #define	res_send_setrhook	__res_send_setrhook
 #define	res_servicename		__res_servicename
 #define	res_servicenumber	__res_servicenumber
-__BEGIN_DECLS
 int		res_hnok(const char *);
 int		res_ownok(const char *);
 int		res_mailok(const char *);
@@ -454,7 +450,6 @@ const u_char *	p_fqname(const u_char *, const u_char *, FILE *);
 const char *	p_option(u_long);
 char *		p_secstodate(u_long);
 int		dn_count_labels(const char *);
-u_int		res_randomid(void);
 int		res_nameinquery(const char *, int, int, const u_char *,
 				     const u_char *);
 int		res_queriesmatch(const u_char *, const u_char *,
@@ -501,22 +496,23 @@ __LIBC_HIDDEN__ void		res_setservers(res_state,
 __LIBC_HIDDEN__ int		res_getservers(res_state,
 				    union res_sockaddr_union *, int);
 
-__LIBC_HIDDEN__ void res_setnetid(res_state, unsigned);
-__LIBC_HIDDEN__ void res_setmark(res_state, unsigned);
-u_int  res_randomid(void);
+struct android_net_context; /* forward */
+__LIBC_HIDDEN__ void res_setnetcontext(res_state, const struct android_net_context *);
 
-#ifdef __i386__
-# define __socketcall extern __attribute__((__cdecl__))
-#else
-# define __socketcall extern
-#endif
+// We use the OpenBSD __res_randomid...
+u_int __res_randomid(void);
+// ...but NetBSD calls it res_randomid.
+#define res_randomid __res_randomid
 
-__socketcall int __connect(int, const struct sockaddr*, socklen_t);
+int __connect(int, const struct sockaddr*, socklen_t);
 
-#undef __socketcall
+// Symbols that are supposed to be in resolv.h, but that we aren't exporting.
+int ns_parserr2(ns_msg*, ns_sect, int, ns_rr2*);
+int ns_name_pton2(const char*, u_char*, size_t, size_t*);
+int ns_name_unpack2(const u_char*, const u_char*, const u_char*, u_char*, size_t, size_t*);
+int ns_name_eq(ns_nname_ct, size_t, ns_nname_ct, size_t);
+int ns_name_owned(ns_namemap_ct, int, ns_namemap_ct, int);
+int ns_name_map(ns_nname_ct, size_t, ns_namemap_t, int);
+int ns_name_labels(ns_nname_ct, size_t);
 
 __END_DECLS
-
-#pragma GCC visibility pop
-
-#endif /* !_RESOLV_PRIVATE_H_ */

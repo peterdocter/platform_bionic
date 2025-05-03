@@ -1,4 +1,4 @@
-/*	$OpenBSD: fputwc.c,v 1.4 2009/11/09 00:18:27 kurt Exp $	*/
+/*	$OpenBSD: fputwc.c,v 1.7 2016/01/26 13:57:02 schwarze Exp $	*/
 /* $NetBSD: fputwc.c,v 1.3 2003/03/07 07:11:37 tshiozak Exp $ */
 
 /*-
@@ -46,8 +46,7 @@ __fputwc_unlock(wchar_t wc, FILE *fp)
 	struct __suio uio;
 	struct __siov iov;
 
-	/* LINTED we don't play with buf */
-	iov.iov_base = (void *)buf;
+	iov.iov_base = buf;
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;
 
@@ -63,7 +62,7 @@ __fputwc_unlock(wchar_t wc, FILE *fp)
 
 	size = wcrtomb(buf, wc, st);
 	if (size == (size_t)-1) {
-		errno = EILSEQ;
+		fp->_flags |= __SERR;
 		return WEOF;
 	}
 
@@ -86,3 +85,4 @@ fputwc(wchar_t wc, FILE *fp)
 
 	return (r);
 }
+DEF_STRONG(fputwc);

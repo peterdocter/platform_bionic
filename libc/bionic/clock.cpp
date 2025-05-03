@@ -26,17 +26,15 @@
  * SUCH DAMAGE.
  */
 
-#include <time.h>
-#include <sys/sysconf.h>
 #include <sys/times.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "private/bionic_constants.h"
 
-// http://pubs.opengroup.org/onlinepubs/9699919799/functions/clock.html
+// https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/clock.html
 clock_t clock() {
   timespec ts;
-  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == -1) {
-    return -1;
-  }
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
   return (ts.tv_sec * CLOCKS_PER_SEC) + (ts.tv_nsec / (NS_PER_S / CLOCKS_PER_SEC));
 }

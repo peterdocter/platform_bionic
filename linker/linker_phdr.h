@@ -25,8 +25,8 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef LINKER_PHDR_H
-#define LINKER_PHDR_H
+
+#pragma once
 
 /* Declarations related to the ELF program header table and segments.
  *
@@ -36,30 +36,69 @@
  */
 
 #include "linker.h"
+#include "linker_mapped_file_fragment.h"
+#include "linker_note_gnu_property.h"
+
+#include <list>
+
+#define MAYBE_MAP_FLAG(x, from, to)  (((x) & (from)) ? (to) : 0)
+#define PFLAGS_TO_PROT(x)            (MAYBE_MAP_FLAG((x), PF_X, PROT_EXEC) | \
+                                      MAYBE_MAP_FLAG((x), PF_R, PROT_READ) | \
+                                      MAYBE_MAP_FLAG((x), PF_W, PROT_WRITE))
+
+static constexpr size_t kCompatPageSize = 0x1000;
 
 class ElfReader {
  public:
-  ElfReader(const char* name, int fd, off64_t file_offset, off64_t file_size);
-  ~ElfReader();
+  ElfReader();
 
-  bool Load(const android_dlextinfo* extinfo);
+  [[nodiscard]] bool Read(const char* name, int fd, off64_t file_offset, off64_t file_size);
+  [[nodiscard]] bool Load(address_space_params* address_space);
 
-  size_t phdr_count() { return phdr_num_; }
-  ElfW(Addr) load_start() { return reinterpret_cast<ElfW(Addr)>(load_start_); }
-  size_t load_size() { return load_size_; }
-  ElfW(Addr) load_bias() { return load_bias_; }
-  const ElfW(Phdr)* loaded_phdr() { return loaded_phdr_; }
+  const char* name() const { return name_.c_str(); }
+  size_t phdr_count() const { return phdr_num_; }
+  ElfW(Addr) load_start() const { return reinterpret_cast<ElfW(Addr)>(load_start_); }
+  size_t load_size() const { return load_size_; }
+  ElfW(Addr) gap_start() const { return reinterpret_cast<ElfW(Addr)>(gap_start_); }
+  size_t gap_size() const { return gap_size_; }
+  ElfW(Addr) load_bias() const { return load_bias_; }
+  const ElfW(Phdr)* loaded_phdr() const { return loaded_phdr_; }
+  const ElfW(Dyn)* dynamic() const { return dynamic_; }
+  const char* get_string(ElfW(Word) index) const;
+  bool is_mapped_by_caller() const { return mapped_by_caller_; }
+  ElfW(Addr) entry_point() const { return header_.e_entry + load_bias_; }
+  bool should_pad_segments() const { return should_pad_segments_; }
+  bool should_use_16kib_app_compat() const { return should_use_16kib_app_compat_; }
+  ElfW(Addr) compat_relro_start() const { return compat_relro_start_; }
+  ElfW(Addr) compat_relro_size() const { return compat_relro_size_; }
 
  private:
-  bool ReadElfHeader();
-  bool VerifyElfHeader();
-  bool ReadProgramHeader();
-  bool ReserveAddressSpace(const android_dlextinfo* extinfo);
-  bool LoadSegments();
-  bool FindPhdr();
-  bool CheckPhdr(ElfW(Addr));
+  [[nodiscard]] bool ReadElfHeader();
+  [[nodiscard]] bool VerifyElfHeader();
+  [[nodiscard]] bool ReadProgramHeaders();
+  [[nodiscard]] bool CheckProgramHeaderAlignment();
+  [[nodiscard]] bool ReadSectionHeaders();
+  [[nodiscard]] bool ReadDynamicSection();
+  [[nodiscard]] bool ReadPadSegmentNote();
+  [[nodiscard]] bool ReserveAddressSpace(address_space_params* address_space);
+  [[nodiscard]] bool MapSegment(size_t seg_idx, size_t len);
+  [[nodiscard]] bool CompatMapSegment(size_t seg_idx, size_t len);
+  void ZeroFillSegment(const ElfW(Phdr)* phdr);
+  void DropPaddingPages(const ElfW(Phdr)* phdr, uint64_t seg_file_end);
+  [[nodiscard]] bool MapBssSection(const ElfW(Phdr)* phdr, ElfW(Addr) seg_page_end,
+                                   ElfW(Addr) seg_file_end);
+  [[nodiscard]] bool IsEligibleFor16KiBAppCompat(ElfW(Addr)* vaddr);
+  [[nodiscard]] bool HasAtMostOneRelroSegment(const ElfW(Phdr)** relro_phdr);
+  [[nodiscard]] bool Setup16KiBAppCompat();
+  [[nodiscard]] bool LoadSegments();
+  [[nodiscard]] bool FindPhdr();
+  [[nodiscard]] bool FindGnuPropertySection();
+  [[nodiscard]] bool CheckPhdr(ElfW(Addr));
+  [[nodiscard]] bool CheckFileRange(ElfW(Addr) offset, size_t size, size_t alignment);
 
-  const char* name_;
+  bool did_read_;
+  bool did_load_;
+  std::string name_;
   int fd_;
   off64_t file_offset_;
   off64_t file_size_;
@@ -67,38 +106,78 @@ class ElfReader {
   ElfW(Ehdr) header_;
   size_t phdr_num_;
 
-  void* phdr_mmap_;
-  ElfW(Phdr)* phdr_table_;
-  ElfW(Addr) phdr_size_;
+  MappedFileFragment phdr_fragment_;
+  const ElfW(Phdr)* phdr_table_;
+
+  MappedFileFragment shdr_fragment_;
+  const ElfW(Shdr)* shdr_table_;
+  size_t shdr_num_;
+
+  MappedFileFragment dynamic_fragment_;
+  const ElfW(Dyn)* dynamic_;
+
+  MappedFileFragment strtab_fragment_;
+  const char* strtab_;
+  size_t strtab_size_;
 
   // First page of reserved address space.
   void* load_start_;
   // Size in bytes of reserved address space.
   size_t load_size_;
+  // First page of inaccessible gap mapping reserved for this DSO.
+  void* gap_start_;
+  // Size in bytes of the gap mapping.
+  size_t gap_size_;
   // Load bias.
   ElfW(Addr) load_bias_;
 
+  // Maximum and minimum alignment requirements across all phdrs.
+  size_t max_align_;
+  size_t min_align_;
+
   // Loaded phdr.
   const ElfW(Phdr)* loaded_phdr_;
+
+  // Is map owned by the caller
+  bool mapped_by_caller_;
+
+  // Pad gaps between segments when memory mapping?
+  bool should_pad_segments_ = false;
+
+  // Use app compat mode when loading 4KiB max-page-size ELFs on 16KiB page-size devices?
+  bool should_use_16kib_app_compat_ = false;
+
+  // RELRO region for 16KiB compat loading
+  ElfW(Addr) compat_relro_start_ = 0;
+  ElfW(Addr) compat_relro_size_ = 0;
+
+  // Only used by AArch64 at the moment.
+  GnuPropertySection note_gnu_property_ __unused;
 };
 
 size_t phdr_table_get_load_size(const ElfW(Phdr)* phdr_table, size_t phdr_count,
                                 ElfW(Addr)* min_vaddr = nullptr, ElfW(Addr)* max_vaddr = nullptr);
 
-int phdr_table_protect_segments(const ElfW(Phdr)* phdr_table,
-                                size_t phdr_count, ElfW(Addr) load_bias);
+int phdr_table_protect_segments(const ElfW(Phdr)* phdr_table, size_t phdr_count,
+                                ElfW(Addr) load_bias, bool should_pad_segments,
+                                bool should_use_16kib_app_compat,
+                                const GnuPropertySection* prop = nullptr);
 
 int phdr_table_unprotect_segments(const ElfW(Phdr)* phdr_table, size_t phdr_count,
-                                  ElfW(Addr) load_bias);
+                                  ElfW(Addr) load_bias, bool should_pad_segments,
+                                  bool should_use_16kib_app_compat);
 
 int phdr_table_protect_gnu_relro(const ElfW(Phdr)* phdr_table, size_t phdr_count,
-                                 ElfW(Addr) load_bias);
+                                 ElfW(Addr) load_bias, bool should_pad_segments,
+                                 bool should_use_16kib_app_compat);
+
+int phdr_table_protect_gnu_relro_16kib_compat(ElfW(Addr) start, ElfW(Addr) size);
 
 int phdr_table_serialize_gnu_relro(const ElfW(Phdr)* phdr_table, size_t phdr_count,
-                                   ElfW(Addr) load_bias, int fd);
+                                   ElfW(Addr) load_bias, int fd, size_t* file_offset);
 
 int phdr_table_map_gnu_relro(const ElfW(Phdr)* phdr_table, size_t phdr_count,
-                             ElfW(Addr) load_bias, int fd);
+                             ElfW(Addr) load_bias, int fd, size_t* file_offset);
 
 #if defined(__arm__)
 int phdr_table_get_arm_exidx(const ElfW(Phdr)* phdr_table, size_t phdr_count, ElfW(Addr) load_bias,
@@ -109,7 +188,17 @@ void phdr_table_get_dynamic_section(const ElfW(Phdr)* phdr_table, size_t phdr_co
                                     ElfW(Addr) load_bias, ElfW(Dyn)** dynamic,
                                     ElfW(Word)* dynamic_flags);
 
-const char* phdr_table_get_interpreter_name(const ElfW(Phdr) * phdr_table, size_t phdr_count,
+const char* phdr_table_get_interpreter_name(const ElfW(Phdr)* phdr_table, size_t phdr_count,
                                             ElfW(Addr) load_bias);
 
-#endif /* LINKER_PHDR_H */
+bool page_size_migration_supported();
+
+int remap_memtag_globals_segments(const ElfW(Phdr) * phdr_table, size_t phdr_count,
+                                  ElfW(Addr) load_bias);
+
+void protect_memtag_globals_ro_segments(const ElfW(Phdr) * phdr_table, size_t phdr_count,
+                                        ElfW(Addr) load_bias);
+
+void name_memtag_globals_segments(const ElfW(Phdr) * phdr_table, size_t phdr_count,
+                                  ElfW(Addr) load_bias, const char* soname,
+                                  std::list<std::string>* vma_names);

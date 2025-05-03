@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-import sys, cpp, kernel, glob, os, re, getopt, clean_header, subprocess
+import sys, cpp, kernel, glob, os, re, getopt, clean_header, shutil
 from defaults import *
 from utils import *
 
-def usage():
-    print """\
+def Usage():
+    print("""\
   usage: %(progname)s [kernel-original-path] [kernel-modified-path]
 
     this program is used to update all the auto-generated clean headers
@@ -20,103 +20,138 @@ def usage():
         android tree
 
       - the clean headers will be placed in 'bionic/libc/kernel/arch-<arch>/asm',
-        'bionic/libc/kernel/common', etc..
-""" % { "progname" : os.path.basename(sys.argv[0]) }
+        'bionic/libc/kernel/android', etc..
+""" % { "progname" : os.path.basename(sys.argv[0]) })
     sys.exit(0)
+
+def ProcessFiles(updater, original_dir, modified_dir, src_rel_dir, update_rel_dir):
+    # Delete the old headers before updating to the new headers.
+    update_dir = os.path.join(get_kernel_dir(), update_rel_dir)
+    for root, dirs, files in os.walk(update_dir, topdown=True):
+        for entry in files:
+            # BUILD is a special file that needs to be preserved.
+            if entry == "BUILD":
+                continue
+            os.remove(os.path.join(root, entry))
+        for entry in dirs:
+            shutil.rmtree(os.path.join(root, entry))
+
+    src_dir = os.path.normpath(os.path.join(original_dir, src_rel_dir))
+    src_dir_len = len(src_dir) + 1
+    mod_src_dir = os.path.join(modified_dir, src_rel_dir)
+    update_dir = os.path.join(get_kernel_dir(), update_rel_dir)
+
+    kernel_dir = get_kernel_dir()
+    for root, _, files in os.walk(src_dir):
+        for file in sorted(files):
+            _, ext = os.path.splitext(file)
+            if ext != ".h":
+                continue
+            src_file = os.path.normpath(os.path.join(root, file))
+            rel_path = src_file[src_dir_len:]
+            # Check to see if there is a modified header to use instead.
+            if os.path.exists(os.path.join(mod_src_dir, rel_path)):
+                src_file = os.path.join(mod_src_dir, rel_path)
+                src_str = os.path.join("<modified>", src_rel_dir, rel_path)
+            else:
+                src_str = os.path.join("<original>", src_rel_dir, rel_path)
+            dst_file = os.path.join(update_dir, rel_path)
+            new_data = clean_header.cleanupFile(dst_file, src_file, rel_path)
+            if not new_data:
+                continue
+            updater.readFile(dst_file)
+            ret_val = updater.editFile(dst_file, new_data)
+            if ret_val == 0:
+                state = "unchanged"
+            elif ret_val == 1:
+                state = "edited"
+            else:
+                state = "added"
+            update_path = os.path.join(update_rel_dir, rel_path)
+            print("cleaning %s -> %s (%s)" % (src_str, update_path, state))
+
+
+# This lets us support regular system calls like __NR_write and also weird
+# ones like __ARM_NR_cacheflush, where the NR doesn't come at the start.
+def make__NR_name(name):
+    if name.startswith('__ARM_NR_'):
+        return name
+    else:
+        return '__NR_%s' % (name)
+
+
+# Scan Linux kernel asm/unistd.h files containing __NR_* constants
+# and write out equivalent SYS_* constants for glibc source compatibility.
+def GenerateGlibcSyscallsHeader(updater):
+    libc_root = '%s/bionic/libc/' % os.environ['ANDROID_BUILD_TOP']
+
+    # Collect the set of all syscalls for all architectures.
+    syscalls = set()
+    pattern = re.compile(r'^\s*#\s*define\s*__NR_([a-z_]\S+)')
+    for unistd_h in glob.glob('%s/kernel/uapi/asm-*/asm/unistd*.h' % libc_root):
+        for line in open(unistd_h):
+            m = re.search(pattern, line)
+            if m:
+                nr_name = m.group(1)
+                if 'reserved' not in nr_name and 'unused' not in nr_name:
+                    syscalls.add(nr_name)
+
+    # Create a single file listing them all.
+    # Note that the input files include #if trickery, so even for a single
+    # architecture we don't know exactly which ones are available.
+    # https://b.corp.google.com/issues/37110151
+    content = '/* Generated file. Do not edit. */\n'
+    content += '#pragma once\n'
+
+    for syscall in sorted(syscalls):
+        nr_name = make__NR_name(syscall)
+        content += '#if defined(%s)\n' % nr_name
+        content += '  #define SYS_%s %s\n' % (syscall, nr_name)
+        content += '#endif\n'
+
+    syscall_file = os.path.join(libc_root, 'include/bits/glibc-syscalls.h')
+    updater.readFile(syscall_file)
+    updater.editFile(syscall_file, content)
+
 
 try:
     optlist, args = getopt.getopt(sys.argv[1:], '')
 except:
-    # unrecognized option
+    # Unrecognized option
     sys.stderr.write("error: unrecognized option\n")
-    usage()
+    Usage()
 
 if len(optlist) > 0 or len(args) > 2:
-    usage()
+    Usage()
 
-modified_dir = get_kernel_headers_modified_dir()
-if len(args) == 1 or len(args) == 2:
+if len(args) > 0:
     original_dir = args[0]
-    if not os.path.isdir(original_dir):
-        panic("Not a directory: %s\n" % original_dir)
-
-    if len(args) == 2:
-        modified_dir = args[1]
-        if not os.path.isdir(modified_dir):
-            panic("Not a directory: %s\n" % modified_dir)
 else:
     original_dir = get_kernel_headers_original_dir()
-    if not os.path.isdir(original_dir):
-        panic("Missing directory, please specify one through command-line: %s\n" % original_dir)
+
+if len(args) > 1:
+    modified_dir = args[1]
+else:
+    modified_dir = get_kernel_headers_modified_dir()
+
+if not os.path.isdir(original_dir):
+    panic("The kernel directory %s is not a directory\n" % original_dir)
 
 if not os.path.isdir(modified_dir):
-    modified_dir = None
+    panic("The kernel modified directory %s is not a directory\n" % modified_dir)
 
-# Find all source files in 'original'.
-sources = dict()
-original_dir = os.path.normpath(original_dir)
-original_dir_len = len(original_dir) + 1
-for root, _, files in os.walk(original_dir):
-    for file in files:
-        _, ext = os.path.splitext(file)
-        if ext == ".h":
-            rel_path = os.path.normpath(os.path.join(root, file))
-            rel_path = rel_path[original_dir_len:]
-            # Check to see if there is a modified header to use instead.
-            if modified_dir and os.path.exists(os.path.join(modified_dir, rel_path)):
-                sources[rel_path] = False
-            else:
-                sources[rel_path] = True
+updater = BatchFileUpdater()
 
+# Process the original uapi headers first.
+ProcessFiles(updater, original_dir, modified_dir, "uapi", "uapi"),
 
-b = BatchFileUpdater()
+# Now process the special files.
+ProcessFiles(updater, original_dir, modified_dir, "scsi", os.path.join("android", "scsi", "scsi"))
 
-kernel_dir = get_kernel_dir()
-for arch in kernel_archs:
-    b.readDir(os.path.join(kernel_dir, "arch-%s" % arch))
+# Copy all of the files.
+updater.updateFiles()
 
-b.readDir(os.path.join(kernel_dir, "common"))
-
-oldlen = 120
-android_root_len = len(get_android_root()) + 1
-for rel_path in sorted(sources):
-    if sources[rel_path]:
-        src_dir = original_dir
-        src_str = "<original>/"
-    else:
-        src_dir = modified_dir
-        src_str = "<modified>/"
-    dst_path, newdata = clean_header.cleanupFile(kernel_dir, src_dir, rel_path)
-    if not dst_path:
-        continue
-
-    dst_path = os.path.join(kernel_dir, dst_path)
-    b.readFile(dst_path)
-    r = b.editFile(dst_path, newdata)
-    if r == 0:
-        state = "unchanged"
-    elif r == 1:
-        state = "edited"
-    else:
-        state = "added"
-
-    # dst_path is guaranteed to include android root.
-    rel_dst_path = dst_path[android_root_len:]
-    str = "cleaning: %-*s -> %-*s (%s)" % (35, src_str + rel_path, 35, rel_dst_path, state)
-    if sys.stdout.isatty():
-        print "%-*s" % (oldlen, str),
-        if (r == 0):
-            print "\r",
-        else:
-            print "\n",
-            oldlen = 0
-    else:
-        print str
-
-    oldlen = len(str)
-
-print "%-*s" % (oldlen, "Done!")
-
-b.updateGitFiles()
-
-sys.exit(0)
+# Now re-generate the <bits/glibc-syscalls.h> from the new uapi headers.
+updater = BatchFileUpdater()
+GenerateGlibcSyscallsHeader(updater)
+updater.updateFiles()

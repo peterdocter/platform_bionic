@@ -30,7 +30,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 
-#include "private/bionic_macros.h"
+#include "platform/bionic/macros.h"
 
 struct atfork_t {
   atfork_t* next;
@@ -45,7 +45,7 @@ struct atfork_t {
 
 class atfork_list_t {
  public:
-  atfork_list_t() : first_(nullptr), last_(nullptr) {}
+  constexpr atfork_list_t() : first_(nullptr), last_(nullptr) {}
 
   template<typename F>
   void walk_forward(F f) {
@@ -107,7 +107,7 @@ class atfork_list_t {
   atfork_t* first_;
   atfork_t* last_;
 
-  DISALLOW_COPY_AND_ASSIGN(atfork_list_t);
+  BIONIC_DISALLOW_COPY_AND_ASSIGN(atfork_list_t);
 };
 
 static pthread_mutex_t g_atfork_list_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
@@ -130,13 +130,15 @@ void __bionic_atfork_run_prepare() {
 }
 
 void __bionic_atfork_run_child() {
+  g_atfork_list_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+
+  pthread_mutex_lock(&g_atfork_list_mutex);
   g_atfork_list.walk_forward([](atfork_t* it) {
     if (it->child != nullptr) {
       it->child();
     }
   });
-
-  g_atfork_list_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+  pthread_mutex_unlock(&g_atfork_list_mutex);
 }
 
 void __bionic_atfork_run_parent() {
@@ -178,4 +180,3 @@ extern "C" __LIBC_HIDDEN__ void __unregister_atfork(void* dso) {
   });
   pthread_mutex_unlock(&g_atfork_list_mutex);
 }
-

@@ -18,6 +18,8 @@
 
 #include <search.h>
 
+#include "utils.h"
+
 static int int_cmp(const void* lhs, const void* rhs) {
   return *reinterpret_cast<const int*>(rhs) - *reinterpret_cast<const int*>(lhs);
 }
@@ -49,7 +51,7 @@ TEST(search, lfind_lsearch) {
 }
 
 struct node {
-  node(const char* s) : s(strdup(s)) {}
+  explicit node(const char* s) : s(strdup(s)) {}
 
   char* s;
 };
@@ -114,8 +116,13 @@ TEST(search, tfind_tsearch_twalk_tdestroy) {
   ASSERT_EQ(3U, g_free_calls);
 }
 
+TEST(search, tdestroy_null) {
+  // It's okay to pass a null node, and your callback will not be called.
+  tdestroy(nullptr, nullptr);
+}
+
 struct pod_node {
-  pod_node(int i) : i(i) {}
+  explicit pod_node(int i) : i(i) {}
   int i;
 };
 
@@ -136,7 +143,7 @@ TEST(search, tdelete) {
 }
 
 struct q_node {
-  q_node(int i) : i(i) {}
+  explicit q_node(int i) : i(i) {}
 
   q_node* next;
   q_node* prev;
@@ -151,18 +158,18 @@ TEST(search, insque_remque) {
 
   // Linear (not circular).
 
-  insque(&zero, NULL);
+  insque(&zero, nullptr);
   insque(&one, &zero);
   insque(&two, &one);
 
   int expected = 0;
-  for (q_node* q = &zero; q != NULL; q = q->next) {
+  for (q_node* q = &zero; q != nullptr; q = q->next) {
     ASSERT_EQ(expected, q->i);
     ++expected;
   }
   ASSERT_EQ(3, expected);
 
-  for (q_node* q = &two; q != NULL; q = q->prev) {
+  for (q_node* q = &two; q != nullptr; q = q->prev) {
     --expected;
     ASSERT_EQ(expected, q->i);
   }
@@ -207,4 +214,104 @@ TEST(search, insque_remque) {
   ASSERT_EQ(0, head->next->i);
 
   remque(&zero);
+}
+
+static void AssertEntry(ENTRY* e, const char* expected_key, const char* expected_data) {
+  ASSERT_TRUE(e != nullptr);
+  ASSERT_STREQ(expected_key, reinterpret_cast<char*>(e->key));
+  ASSERT_STREQ(expected_data, reinterpret_cast<char*>(e->data));
+}
+
+TEST(search, hcreate_hsearch_hdestroy) {
+  ASSERT_NE(0, hcreate(13));
+
+  // Add some initial entries.
+  ENTRY* e;
+  e = hsearch(ENTRY{.key = const_cast<char*>("a"), .data = const_cast<char*>("A")}, ENTER);
+  AssertEntry(e, "a", "A");
+  e = hsearch(ENTRY{.key = const_cast<char*>("aa"), .data = const_cast<char*>("B")}, ENTER);
+  AssertEntry(e, "aa", "B");
+  e = hsearch(ENTRY{.key = const_cast<char*>("aaa"), .data = const_cast<char*>("C")}, ENTER);
+  AssertEntry(e, "aaa", "C");
+
+  // Check missing.
+  e = hsearch(ENTRY{.key = const_cast<char*>("aaaa"), .data = nullptr}, FIND);
+  ASSERT_FALSE(e != nullptr);
+
+  // Check present.
+  e = hsearch(ENTRY{.key = const_cast<char*>("aa"), .data = nullptr}, FIND);
+  AssertEntry(e, "aa", "B");
+
+  // ENTER with an existing key just returns the existing ENTRY.
+  e = hsearch(ENTRY{.key = const_cast<char*>("aa"), .data = const_cast<char*>("X")}, ENTER);
+  AssertEntry(e, "aa", "B");
+  e->data = const_cast<char*>("X");
+
+  // Check present and updated.
+  e = hsearch(ENTRY{.key = const_cast<char*>("aa"), .data = nullptr}, FIND);
+  AssertEntry(e, "aa", "X");
+  // But other entries stayed the same.
+  e = hsearch(ENTRY{.key = const_cast<char*>("a"), .data = nullptr}, FIND);
+  AssertEntry(e, "a", "A");
+  e = hsearch(ENTRY{.key = const_cast<char*>("aaa"), .data = nullptr}, FIND);
+  AssertEntry(e, "aaa", "C");
+
+  hdestroy();
+}
+
+TEST(search, hcreate_r_hsearch_r_hdestroy_r) {
+  hsearch_data h1 = {};
+  ASSERT_EQ(1, hcreate_r(13, &h1));
+
+  hsearch_data h2 = {};
+  ASSERT_EQ(1, hcreate_r(128, &h2));
+
+  // Add some initial entries.
+  ENTRY* e;
+  ASSERT_EQ(1, hsearch_r(ENTRY{.key = const_cast<char*>("a"), .data = const_cast<char*>("A")},
+                         ENTER, &e, &h1));
+  AssertEntry(e, "a", "A");
+  ASSERT_EQ(1, hsearch_r(ENTRY{.key = const_cast<char*>("a"), .data = const_cast<char*>("B")},
+                         ENTER, &e, &h2));
+  AssertEntry(e, "a", "B");
+
+  // Check missing.
+  errno = 0;
+  ASSERT_EQ(0, hsearch_r(ENTRY{.key = const_cast<char*>("b"), .data = nullptr}, FIND, &e, &h1));
+  ASSERT_ERRNO(ESRCH);
+
+  // Check present.
+  ASSERT_EQ(1, hsearch_r(ENTRY{.key = const_cast<char*>("a"), .data = nullptr}, FIND, &e, &h1));
+  AssertEntry(e, "a", "A");
+  ASSERT_EQ(1, hsearch_r(ENTRY{.key = const_cast<char*>("a"), .data = nullptr}, FIND, &e, &h2));
+  AssertEntry(e, "a", "B");
+
+  // Destroying one doesn't affect the other.
+  hdestroy_r(&h1);
+  ASSERT_EQ(1, hsearch_r(ENTRY{.key = const_cast<char*>("a"), .data = nullptr}, FIND, &e, &h2));
+  AssertEntry(e, "a", "B");
+  hdestroy_r(&h2);
+}
+
+TEST(search, hsearch_resizing) {
+  ASSERT_NE(0, hcreate(1));
+
+  std::vector<char*> entries;
+  // Add enough entries to ensure that we've had to resize.
+  for (char ch = ' '; ch <= '~'; ++ch) {
+    char* p;
+    asprintf(&p, "%c", ch);
+    ENTRY e;
+    e.data = e.key = p;
+    ASSERT_TRUE(hsearch(e, ENTER) != nullptr);
+    entries.push_back(p);
+  }
+
+  // Check they're all there.
+  for (auto& p : entries) {
+    ENTRY* e = hsearch(ENTRY{.key = p, .data = nullptr}, FIND);
+    AssertEntry(e, p, p);
+  }
+
+  for (auto& p : entries) free(p);
 }

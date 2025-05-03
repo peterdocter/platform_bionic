@@ -27,7 +27,6 @@
  */
 
 #include <private/bionic_asm.h>
-#include <private/libc_events.h>
 
 /*
  * This code assumes it is running on a processor that supports all arm v7
@@ -37,36 +36,20 @@
     .fpu    neon
     .syntax unified
 
-ENTRY(__memset_chk)
+ENTRY(__memset_chk_a9)
         cmp         r2, r3
-        bls         .L_done
+        bls         memset
 
         // Preserve lr for backtrace.
         push        {lr}
         .cfi_def_cfa_offset 4
         .cfi_rel_offset lr, 0
 
-        ldr         r0, error_message
-        ldr         r1, error_code
-1:
-        add         r0, pc
-        bl          __fortify_chk_fail
-error_code:
-        .word       BIONIC_EVENT_MEMSET_BUFFER_OVERFLOW
-error_message:
-        .word       error_string-(1b+8)
-END(__memset_chk)
-
-ENTRY(bzero)
-        mov     r2, r1
-        mov     r1, #0
-
-.L_done:
-        // Fall through to memset...
-END(bzero)
+        bl          __memset_chk_fail
+END(__memset_chk_a9)
 
 /* memset() returns its first argument.  */
-ENTRY(memset)
+ENTRY(memset_a9)
         // The neon memset only wins for less than 132.
         cmp         r2, #132
         bhi         .L_memset_large_copy
@@ -175,8 +158,4 @@ ENTRY(memset)
         movs        r2, r2, lsl #2
         strbcs      r1, [r0]
         ldmfd       sp!, {r0, r4-r7, pc}
-END(memset)
-
-        .data
-error_string:
-        .string     "memset: prevented write past end of buffer"
+END(memset_a9)

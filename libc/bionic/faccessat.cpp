@@ -30,7 +30,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-extern "C" int ___faccessat(int, const char*, int);
+extern "C" int __faccessat(int, const char*, int);
 
 int faccessat(int dirfd, const char* pathname, int mode, int flags) {
   // "The mode specifies the accessibility check(s) to be performed,
@@ -45,15 +45,16 @@ int faccessat(int dirfd, const char* pathname, int mode, int flags) {
   if (flags != 0) {
     // We deliberately don't support AT_SYMLINK_NOFOLLOW, a glibc
     // only feature which is error prone and dangerous.
+    // More details at http://permalink.gmane.org/gmane.linux.lib.musl.general/6952
     //
     // AT_EACCESS isn't supported either. Android doesn't have setuid
-    // programs, and never runs code with euid!=uid. It could be
-    // implemented in an expensive way, following the model at
-    // https://gitlab.com/bminor/musl/commit/0a05eace163cee9b08571d2ff9d90f5e82d9c228
-    // but not worth it.
+    // programs, and never runs code with euid!=uid.
+    //
+    // We could use faccessat2(2) from Linux 5.8, but since we don't want the
+    // first feature and don't need the second, we just reject such requests.
     errno = EINVAL;
     return -1;
   }
 
-  return ___faccessat(dirfd, pathname, mode);
+  return __faccessat(dirfd, pathname, mode);
 }

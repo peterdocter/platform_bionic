@@ -33,72 +33,43 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "private/get_cpu_count_from_string.h"
+#include "platform/bionic/page.h"
 #include "private/ScopedReaddir.h"
+#include "private/get_cpu_count_from_string.h"
 
-static bool __matches_cpuN(const char* s) {
-  // The %c trick is to ensure that we have the anchored match "^cpu[0-9]+$".
-  unsigned cpu;
-  char dummy;
-  return (sscanf(s, "cpu%u%c", &cpu, &dummy) == 1);
-}
-
-int get_nprocs_conf() {
-  // On x86 kernels you can use /proc/cpuinfo for this, but on ARM kernels offline CPUs disappear
-  // from there. This method works on both.
-  ScopedReaddir reader("/sys/devices/system/cpu");
-  if (reader.IsBad()) {
-    return 1;
-  }
-
-  int result = 0;
-  dirent* entry;
-  while ((entry = reader.ReadEntry()) != NULL) {
-    if (entry->d_type == DT_DIR && __matches_cpuN(entry->d_name)) {
-      ++result;
-    }
-  }
-  return result;
-}
-
-int get_nprocs() {
+int __get_cpu_count(const char* sys_file) {
   int cpu_count = 1;
-  FILE* fp = fopen("/sys/devices/system/cpu/online", "re");
+  FILE* fp = fopen(sys_file, "re");
   if (fp != nullptr) {
     char* line = nullptr;
-    size_t len = 0;
-    if (getline(&line, &len, fp) != -1) {
+    size_t allocated_size = 0;
+    if (getline(&line, &allocated_size, fp) != -1) {
       cpu_count = GetCpuCountFromString(line);
-      free(line);
     }
+    free(line);
     fclose(fp);
   }
   return cpu_count;
 }
 
-static int __get_meminfo_page_count(const char* pattern) {
-  FILE* fp = fopen("/proc/meminfo", "re");
-  if (fp == NULL) {
-    return -1;
-  }
+int get_nprocs_conf() {
+  // It's unclear to me whether this is intended to be "possible" or "present",
+  // but on mobile they're unlikely to differ.
+  return __get_cpu_count("/sys/devices/system/cpu/possible");
+}
 
-  int page_count = -1;
-  char buf[256];
-  while (fgets(buf, sizeof(buf), fp) != NULL) {
-    long total;
-    if (sscanf(buf, pattern, &total) == 1) {
-      page_count = static_cast<int>(total / (sysconf(_SC_PAGE_SIZE) / 1024));
-      break;
-    }
-  }
-  fclose(fp);
-  return page_count;
+int get_nprocs() {
+  return __get_cpu_count("/sys/devices/system/cpu/online");
 }
 
 long get_phys_pages() {
-  return __get_meminfo_page_count("MemTotal: %ld kB");
+  struct sysinfo si;
+  sysinfo(&si);
+  return (static_cast<int64_t>(si.totalram) * si.mem_unit) / page_size();
 }
 
 long get_avphys_pages() {
-  return __get_meminfo_page_count("MemFree: %ld kB");
+  struct sysinfo si;
+  sysinfo(&si);
+  return ((static_cast<int64_t>(si.freeram) + si.bufferram) * si.mem_unit) / page_size();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 The Android Open Source Project
+ * Copyright (C) 2008 The Android Open Source Project
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,29 +27,52 @@
  */
 
 #include <errno.h>
-#include <pthread.h>
 #include <signal.h>
 
-#include "private/kernel_sigset_t.h"
+#include <platform/bionic/reserved_signals.h>
 
-extern "C" int __rt_sigprocmask(int, const kernel_sigset_t*, kernel_sigset_t*, size_t);
+#include "private/SigSetConverter.h"
 
-int sigprocmask(int how, const sigset_t* bionic_new_set, sigset_t* bionic_old_set) {
-  kernel_sigset_t new_set;
-  kernel_sigset_t* new_set_ptr = NULL;
-  if (bionic_new_set != NULL) {
-    new_set.set(bionic_new_set);
-    new_set_ptr = &new_set;
-  }
+extern "C" int __rt_sigprocmask(int, const sigset64_t*, sigset64_t*, size_t);
 
-  kernel_sigset_t old_set;
-  if (__rt_sigprocmask(how, new_set_ptr, &old_set, sizeof(old_set)) == -1) {
+//
+// These need to be kept separate from pthread_sigmask, sigblock, sigsetmask,
+// sighold, and sigset because libsigchain only intercepts sigprocmask so we
+// can't allow clang to decide to inline sigprocmask.
+//
+
+int sigprocmask64(int how,
+                  const sigset64_t* new_set,
+                  sigset64_t* old_set) __attribute__((__noinline__)) {
+  // how is only checked for validity if new_set is provided.
+  if (new_set && how != SIG_BLOCK && how != SIG_UNBLOCK && how != SIG_SETMASK) {
+    errno = EINVAL;
     return -1;
   }
 
-  if (bionic_old_set != NULL) {
-    *bionic_old_set = old_set.bionic;
+  sigset64_t mutable_new_set;
+  sigset64_t* mutable_new_set_ptr = nullptr;
+  if (new_set) {
+    mutable_new_set = filter_reserved_signals(*new_set, how);
+    mutable_new_set_ptr = &mutable_new_set;
   }
-
-  return 0;
+  return __rt_sigprocmask(how, mutable_new_set_ptr, old_set, sizeof(*new_set));
 }
+
+#if defined(__LP64__)
+// For LP64, `sigset64_t` and `sigset_t` are the same.
+__strong_alias(sigprocmask, sigprocmask64);
+#else
+// ILP32 needs a shim.
+int sigprocmask(int how,
+                const sigset_t* bionic_new_set,
+                sigset_t* bionic_old_set) __attribute__((__noinline__)) {
+  SigSetConverter new_set{bionic_new_set};
+  SigSetConverter old_set{bionic_old_set};
+  int rc = sigprocmask64(how, new_set.ptr, old_set.ptr);
+  if (rc == 0 && bionic_old_set != nullptr) {
+    old_set.copy_out();
+  }
+  return rc;
+}
+#endif

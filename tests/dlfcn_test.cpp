@@ -17,15 +17,28 @@
 #include <gtest/gtest.h>
 
 #include <dlfcn.h>
-#include <libgen.h>
+#include <elf.h>
 #include <limits.h>
-#include <stdio.h>
+#include <link.h>
 #include <stdint.h>
-
-#include "private/ScopeGuard.h"
+#include <stdio.h>
+#include <string.h>
+#include <sys/cdefs.h>
+#if __has_include(<sys/auxv.h>)
+#include <sys/auxv.h>
+#endif
+#include <sys/user.h>
 
 #include <string>
+#include <thread>
 
+#include <android-base/file.h>
+#include <android-base/macros.h>
+#include <android-base/scopeguard.h>
+
+#include "gtest_globals.h"
+#include "gtest_utils.h"
+#include "dlfcn_symlink_support.h"
 #include "utils.h"
 
 #define ASSERT_SUBSTR(needle, haystack) \
@@ -38,15 +51,24 @@ extern "C" void DlSymTestFunction() {
 }
 
 static int g_ctor_function_called = 0;
+static int g_ctor_argc = 0;
+static char** g_ctor_argv = reinterpret_cast<char**>(0xDEADBEEF);
+static char** g_ctor_envp = g_ctor_envp;
 
-extern "C" void ctor_function() __attribute__ ((constructor));
+extern "C" void ctor_function(int argc, char** argv, char** envp) __attribute__ ((constructor));
 
-extern "C" void ctor_function() {
+extern "C" void ctor_function(int argc, char** argv, char** envp) {
   g_ctor_function_called = 17;
+  g_ctor_argc = argc;
+  g_ctor_argv = argv;
+  g_ctor_envp = envp;
 }
 
 TEST(dlfcn, ctor_function_call) {
   ASSERT_EQ(17, g_ctor_function_called);
+  ASSERT_TRUE(g_ctor_argc = GetArgc());
+  ASSERT_TRUE(g_ctor_argv = GetArgv());
+  ASSERT_TRUE(g_ctor_envp = GetEnvp());
 }
 
 TEST(dlfcn, dlsym_in_executable) {
@@ -160,6 +182,16 @@ TEST(dlfcn, dlsym_handle_global_sym) {
   dlclose(handle);
 }
 
+TEST(dlfcn, dlsym_handle_empty_symbol) {
+  // check that dlsym of an empty symbol fails (see http://b/33530622)
+  void* handle = dlopen("libtest_dlsym_from_this.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  void* sym = dlsym(handle, "");
+  ASSERT_TRUE(sym == nullptr);
+  ASSERT_SUBSTR("undefined symbol: ", dlerror());
+  dlclose(handle);
+}
+
 TEST(dlfcn, dlsym_with_dependencies) {
   void* handle = dlopen("libtest_with_dependency.so", RTLD_NOW);
   ASSERT_TRUE(handle != nullptr);
@@ -211,8 +243,59 @@ TEST(dlfcn, dlopen_by_soname) {
   dlclose(handle);
 }
 
-// ifuncs are only supported on intel and arm64 for now
-#if defined (__aarch64__) || defined(__i386__) || defined(__x86_64__)
+TEST(dlfcn, dlopen_vdso) {
+#if __has_include(<sys/auxv.h>)
+  if (getauxval(AT_SYSINFO_EHDR) == 0) {
+    GTEST_SKIP() << "getauxval(AT_SYSINFO_EHDR) == 0, skipping this test";
+  }
+#endif
+
+  const char* vdso_name = "linux-vdso.so.1";
+#if defined(__i386__)
+  vdso_name = "linux-gate.so.1";
+#endif
+  void* handle = dlopen(vdso_name, RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  dlclose(handle);
+}
+
+// HWASan uses an ifunc to describe the location of its shadow memory,
+// so even though it's an unusual case, Android needs to support
+// "ifunc variables".
+TEST(dlfcn, ifunc_variable) {
+  typedef const char* (*fn_ptr)();
+
+  // ifunc's choice depends on whether IFUNC_CHOICE has a value
+  // first check the set case
+  setenv("IFUNC_CHOICE", "set", 1);
+  // preload libtest_ifunc_variable_impl.so
+  void* handle_impl = dlopen("libtest_ifunc_variable_impl.so", RTLD_NOW);
+  void* handle = dlopen("libtest_ifunc_variable.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  const char** foo_ptr = reinterpret_cast<const char**>(dlsym(handle, "foo"));
+  fn_ptr foo_library_ptr = reinterpret_cast<fn_ptr>(dlsym(handle, "foo_library"));
+  ASSERT_TRUE(foo_ptr != nullptr) << dlerror();
+  ASSERT_TRUE(foo_library_ptr != nullptr) << dlerror();
+  ASSERT_EQ(strncmp("set", *foo_ptr, 3), 0);
+  ASSERT_EQ(strncmp("set", foo_library_ptr(), 3), 0);
+  dlclose(handle);
+  dlclose(handle_impl);
+
+  // then check the unset case
+  unsetenv("IFUNC_CHOICE");
+  handle_impl = dlopen("libtest_ifunc_variable_impl.so", RTLD_NOW);
+  handle = dlopen("libtest_ifunc_variable.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  foo_ptr = reinterpret_cast<const char**>(dlsym(handle, "foo"));
+  foo_library_ptr = reinterpret_cast<fn_ptr>(dlsym(handle, "foo_library"));
+  ASSERT_TRUE(foo_ptr != nullptr) << dlerror();
+  ASSERT_TRUE(foo_library_ptr != nullptr) << dlerror();
+  ASSERT_EQ(strncmp("unset", *foo_ptr, 5), 0);
+  ASSERT_EQ(strncmp("unset", foo_library_ptr(), 5), 0);
+  dlclose(handle);
+  dlclose(handle_impl);
+}
+
 TEST(dlfcn, ifunc) {
   typedef const char* (*fn_ptr)();
 
@@ -220,11 +303,11 @@ TEST(dlfcn, ifunc) {
   // first check the set case
   setenv("IFUNC_CHOICE", "set", 1);
   void* handle = dlopen("libtest_ifunc.so", RTLD_NOW);
-  ASSERT_TRUE(handle != nullptr);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
   fn_ptr foo_ptr = reinterpret_cast<fn_ptr>(dlsym(handle, "foo"));
   fn_ptr foo_library_ptr = reinterpret_cast<fn_ptr>(dlsym(handle, "foo_library"));
-  ASSERT_TRUE(foo_ptr != nullptr);
-  ASSERT_TRUE(foo_library_ptr != nullptr);
+  ASSERT_TRUE(foo_ptr != nullptr) << dlerror();
+  ASSERT_TRUE(foo_library_ptr != nullptr) << dlerror();
   ASSERT_EQ(strncmp("set", foo_ptr(), 3), 0);
   ASSERT_EQ(strncmp("set", foo_library_ptr(), 3), 0);
   dlclose(handle);
@@ -232,13 +315,13 @@ TEST(dlfcn, ifunc) {
   // then check the unset case
   unsetenv("IFUNC_CHOICE");
   handle = dlopen("libtest_ifunc.so", RTLD_NOW);
-  ASSERT_TRUE(handle != nullptr);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
   foo_ptr = reinterpret_cast<fn_ptr>(dlsym(handle, "foo"));
   foo_library_ptr = reinterpret_cast<fn_ptr>(dlsym(handle, "foo_library"));
-  ASSERT_TRUE(foo_ptr != nullptr);
-  ASSERT_TRUE(foo_library_ptr != nullptr);
+  ASSERT_TRUE(foo_ptr != nullptr) << dlerror();
+  ASSERT_TRUE(foo_library_ptr != nullptr) << dlerror();
   ASSERT_EQ(strncmp("unset", foo_ptr(), 5), 0);
-  ASSERT_EQ(strncmp("unset", foo_library_ptr(), 3), 0);
+  ASSERT_EQ(strncmp("unset", foo_library_ptr(), 5), 0);
   dlclose(handle);
 }
 
@@ -256,7 +339,21 @@ TEST(dlfcn, ifunc_ctor_call) {
   ASSERT_STREQ("true", is_ctor_called());
   dlclose(handle);
 }
-#endif
+
+TEST(dlfcn, ifunc_ctor_call_rtld_lazy) {
+  typedef const char* (*fn_ptr)();
+
+  void* handle = dlopen("libtest_ifunc.so", RTLD_LAZY);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  fn_ptr is_ctor_called =  reinterpret_cast<fn_ptr>(dlsym(handle, "is_ctor_called_irelative"));
+  ASSERT_TRUE(is_ctor_called != nullptr) << dlerror();
+  ASSERT_STREQ("false", is_ctor_called());
+
+  is_ctor_called =  reinterpret_cast<fn_ptr>(dlsym(handle, "is_ctor_called_jump_slot"));
+  ASSERT_TRUE(is_ctor_called != nullptr) << dlerror();
+  ASSERT_STREQ("true", is_ctor_called());
+  dlclose(handle);
+}
 
 TEST(dlfcn, dlopen_check_relocation_dt_needed_order) {
   // This is the structure of the test library and
@@ -271,9 +368,7 @@ TEST(dlfcn, dlopen_check_relocation_dt_needed_order) {
   // in both dt_needed libraries, the correct relocation should
   // use the function defined in libtest_relo_check_dt_needed_order_1.so
   void* handle = nullptr;
-  auto guard = make_scope_guard([&]() {
-    dlclose(handle);
-  });
+  auto guard = android::base::make_scope_guard([&]() { dlclose(handle); });
 
   handle = dlopen("libtest_relo_check_dt_needed_order.so", RTLD_NOW);
   ASSERT_TRUE(handle != nullptr) << dlerror();
@@ -624,8 +719,10 @@ TEST(dlfcn, dlopen_check_loop) {
   handle = dlopen("libtest_with_dependency_loop.so", RTLD_NOW | RTLD_NOLOAD);
   ASSERT_TRUE(handle == nullptr);
 #ifdef __BIONIC__
-  // TODO: glibc returns nullptr on dlerror() here. Is it bug?
   ASSERT_STREQ("dlopen failed: library \"libtest_with_dependency_loop.so\" wasn't loaded and RTLD_NOLOAD prevented it", dlerror());
+#else
+  // TODO: glibc returns nullptr on dlerror() here. Is it bug?
+  ASSERT_TRUE(dlerror() == nullptr);
 #endif
 
   handle = dlopen("libtest_with_dependency_a.so", RTLD_NOW | RTLD_NOLOAD);
@@ -726,24 +823,62 @@ TEST(dlfcn, dlopen_failure) {
 #endif
 }
 
-static void* ConcurrentDlErrorFn(void*) {
-  dlopen("/child/thread", RTLD_NOW);
-  return reinterpret_cast<void*>(strdup(dlerror()));
+TEST(dlfcn, dlclose_unload) {
+  const size_t kPageSize = getpagesize();
+
+  void* handle = dlopen("libtest_simple.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  uint32_t* taxicab_number = static_cast<uint32_t*>(dlsym(handle, "dlopen_testlib_taxicab_number"));
+  ASSERT_TRUE(taxicab_number != nullptr) << dlerror();
+  EXPECT_EQ(1729U, *taxicab_number);
+  dlclose(handle);
+  // Making sure that the library has been unmapped as part of library unload
+  // process. Note that mprotect somewhat counter-intuitively returns ENOMEM in
+  // this case.
+  uintptr_t page_start = reinterpret_cast<uintptr_t>(taxicab_number) & ~(kPageSize - 1);
+  ASSERT_TRUE(mprotect(reinterpret_cast<void*>(page_start), kPageSize, PROT_NONE) != 0);
+  ASSERT_ERRNO(ENOMEM);
+}
+
+static void ConcurrentDlErrorFn(std::string& error) {
+  ASSERT_TRUE(dlerror() == nullptr);
+
+  void* handle = dlopen("/child/thread", RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+
+  const char* err = dlerror();
+  ASSERT_TRUE(err != nullptr);
+
+  error = err;
+}
+
+TEST(dlfcn, dlerror_concurrent_buffer) {
+  void* handle = dlopen("/main/thread", RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  const char* main_thread_error = dlerror();
+  ASSERT_TRUE(main_thread_error != nullptr);
+  ASSERT_SUBSTR("/main/thread", main_thread_error);
+
+  std::string child_thread_error;
+  std::thread t(ConcurrentDlErrorFn, std::ref(child_thread_error));
+  t.join();
+  ASSERT_SUBSTR("/child/thread", child_thread_error.c_str());
+
+  // Check that main thread local buffer was not modified.
+  ASSERT_SUBSTR("/main/thread", main_thread_error);
 }
 
 TEST(dlfcn, dlerror_concurrent) {
-  dlopen("/main/thread", RTLD_NOW);
+  void* handle = dlopen("/main/thread", RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+
+  std::string child_thread_error;
+  std::thread t(ConcurrentDlErrorFn, std::ref(child_thread_error));
+  t.join();
+  ASSERT_SUBSTR("/child/thread", child_thread_error.c_str());
+
   const char* main_thread_error = dlerror();
-  ASSERT_SUBSTR("/main/thread", main_thread_error);
-
-  pthread_t t;
-  ASSERT_EQ(0, pthread_create(&t, nullptr, ConcurrentDlErrorFn, nullptr));
-  void* result;
-  ASSERT_EQ(0, pthread_join(t, &result));
-  char* child_thread_error = static_cast<char*>(result);
-  ASSERT_SUBSTR("/child/thread", child_thread_error);
-  free(child_thread_error);
-
+  ASSERT_TRUE(main_thread_error != nullptr);
   ASSERT_SUBSTR("/main/thread", main_thread_error);
 }
 
@@ -756,19 +891,14 @@ TEST(dlfcn, dlsym_failures) {
   void* sym;
 
 #if defined(__BIONIC__) && !defined(__LP64__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
   // RTLD_DEFAULT in lp32 bionic is not (void*)0
   // so it can be distinguished from the NULL handle.
   sym = dlsym(nullptr, "test");
   ASSERT_TRUE(sym == nullptr);
-  ASSERT_SUBSTR("dlsym library handle is null", dlerror());
-#endif
-
-  // NULL symbol name.
-#if defined(__BIONIC__)
-  // glibc marks this parameter non-null and SEGVs if you cheat.
-  sym = dlsym(self, nullptr);
-  ASSERT_TRUE(sym == nullptr);
-  ASSERT_SUBSTR("", dlerror());
+  ASSERT_STREQ("dlsym failed: library handle is null", dlerror());
+#pragma clang diagnostic pop
 #endif
 
   // Symbol that doesn't exist.
@@ -796,15 +926,12 @@ TEST(dlfcn, dladdr_executable) {
   ASSERT_NE(rc, 0); // Zero on error, non-zero on success.
 
   // Get the name of this executable.
-  char executable_path[PATH_MAX];
-  rc = readlink("/proc/self/exe", executable_path, sizeof(executable_path));
-  ASSERT_NE(rc, -1);
-  executable_path[rc] = '\0';
+  const std::string executable_path = android::base::GetExecutablePath();
 
   // The filename should be that of this executable.
   char dli_realpath[PATH_MAX];
   ASSERT_TRUE(realpath(info.dli_fname, dli_realpath) != nullptr);
-  ASSERT_STREQ(executable_path, dli_realpath);
+  ASSERT_STREQ(executable_path.c_str(), dli_realpath);
 
   // The symbol name should be the symbol we looked up.
   ASSERT_STREQ(info.dli_sname, "DlSymTestFunction");
@@ -829,30 +956,63 @@ TEST(dlfcn, dladdr_executable) {
   ASSERT_EQ(0, dlclose(self));
 }
 
-#if defined(__LP64__)
-#define BIONIC_PATH_TO_LIBC "/system/lib64/libc.so"
+TEST(dlfcn, dlopen_executable_by_absolute_path) {
+  void* handle1 = dlopen(nullptr, RTLD_NOW);
+  ASSERT_TRUE(handle1 != nullptr) << dlerror();
+
+  void* handle2 = dlopen(android::base::GetExecutablePath().c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle2 != nullptr) << dlerror();
+
+#if defined(__BIONIC__)
+  ASSERT_EQ(handle1, handle2);
 #else
-#define BIONIC_PATH_TO_LIBC "/system/lib/libc.so"
+  GTEST_SKIP() << "Skipping ASSERT_EQ(handle1, handle2) for glibc: "
+                  "it loads a separate copy of the main executable "
+                  "on dlopen by absolute path";
+#endif
+}
+
+#define ALTERNATE_PATH_TO_SYSTEM_LIB "/system/lib64/" ABI_STRING "/"
+#if __has_feature(hwaddress_sanitizer)
+#define PATH_TO_LIBC PATH_TO_SYSTEM_LIB "hwasan/libc.so"
+#define PATH_TO_BOOTSTRAP_LIBC PATH_TO_SYSTEM_LIB "bootstrap/hwasan/libc.so"
+#define ALTERNATE_PATH_TO_LIBC ALTERNATE_PATH_TO_SYSTEM_LIB "hwasan/libc.so"
+#else
+#define PATH_TO_LIBC PATH_TO_SYSTEM_LIB "libc.so"
+#define PATH_TO_BOOTSTRAP_LIBC PATH_TO_SYSTEM_LIB "bootstrap/libc.so"
+#define ALTERNATE_PATH_TO_LIBC ALTERNATE_PATH_TO_SYSTEM_LIB "libc.so"
 #endif
 
 TEST(dlfcn, dladdr_libc) {
-#if defined(__BIONIC__)
+#if defined(__GLIBC__)
+  GTEST_SKIP() << "glibc returns libc.so's ldconfig path, which is a symlink (not a realpath)";
+#endif
+
   Dl_info info;
-  void* addr = reinterpret_cast<void*>(puts); // well-known libc function
+  void* addr = reinterpret_cast<void*>(puts);  // An arbitrary libc function.
   ASSERT_TRUE(dladdr(addr, &info) != 0);
 
-  // /system/lib is symlink when this test is executed on host.
+  // Check if libc is in canonical path or in alternate path.
+  const char* expected_path;
+  if (strncmp(ALTERNATE_PATH_TO_SYSTEM_LIB,
+              info.dli_fname,
+              sizeof(ALTERNATE_PATH_TO_SYSTEM_LIB) - 1) == 0) {
+    // Platform with emulated architecture.  Symlink on ARC++.
+    expected_path = ALTERNATE_PATH_TO_LIBC;
+  } else if (strncmp(PATH_TO_BOOTSTRAP_LIBC, info.dli_fname,
+                     sizeof(PATH_TO_BOOTSTRAP_LIBC) - 1) == 0) {
+    expected_path = PATH_TO_BOOTSTRAP_LIBC;
+  } else {
+    // /system/lib is symlink when this test is executed on host.
+    expected_path = PATH_TO_LIBC;
+  }
   char libc_realpath[PATH_MAX];
-  ASSERT_TRUE(realpath(BIONIC_PATH_TO_LIBC, libc_realpath) == libc_realpath);
+  ASSERT_TRUE(realpath(expected_path, libc_realpath) != nullptr) << strerror(errno);
 
   ASSERT_STREQ(libc_realpath, info.dli_fname);
   // TODO: add check for dfi_fbase
   ASSERT_STREQ("puts", info.dli_sname);
   ASSERT_EQ(addr, info.dli_saddr);
-#else
-  GTEST_LOG_(INFO) << "This test does nothing for glibc. Glibc returns path from ldconfig "
-      "for libc.so, which is symlink itself (not a realpath).\n";
-#endif
 }
 
 TEST(dlfcn, dladdr_invalid) {
@@ -860,25 +1020,23 @@ TEST(dlfcn, dladdr_invalid) {
 
   dlerror(); // Clear any pending errors.
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
   // No symbol corresponding to NULL.
   ASSERT_EQ(dladdr(nullptr, &info), 0); // Zero on error, non-zero on success.
   ASSERT_TRUE(dlerror() == nullptr); // dladdr(3) doesn't set dlerror(3).
+#pragma clang diagnostic pop
 
   // No symbol corresponding to a stack address.
   ASSERT_EQ(dladdr(&info, &info), 0); // Zero on error, non-zero on success.
   ASSERT_TRUE(dlerror() == nullptr); // dladdr(3) doesn't set dlerror(3).
 }
 
-// GNU-style ELF hash tables are incompatible with the MIPS ABI.
-// MIPS requires .dynsym to be sorted to match the GOT but GNU-style requires sorting by hash code.
 TEST(dlfcn, dlopen_library_with_only_gnu_hash) {
-#if !defined(__mips__)
   dlerror(); // Clear any pending errors.
   void* handle = dlopen("libgnu-hash-table-library.so", RTLD_NOW);
   ASSERT_TRUE(handle != nullptr) << dlerror();
-  auto guard = make_scope_guard([&]() {
-    dlclose(handle);
-  });
+  auto guard = android::base::make_scope_guard([&]() { dlclose(handle); });
   void* sym = dlsym(handle, "getRandomNumber");
   ASSERT_TRUE(sym != nullptr) << dlerror();
   int (*fn)(void);
@@ -891,17 +1049,12 @@ TEST(dlfcn, dlopen_library_with_only_gnu_hash) {
   ASSERT_TRUE(fn == dlinfo.dli_saddr);
   ASSERT_STREQ("getRandomNumber", dlinfo.dli_sname);
   ASSERT_SUBSTR("libgnu-hash-table-library.so", dlinfo.dli_fname);
-#else
-  GTEST_LOG_(INFO) << "This test does nothing for mips/mips64; mips toolchain does not support '--hash-style=gnu'\n";
-#endif
 }
 
 TEST(dlfcn, dlopen_library_with_only_sysv_hash) {
   void* handle = dlopen("libsysv-hash-table-library.so", RTLD_NOW);
   ASSERT_TRUE(handle != nullptr) << dlerror();
-  auto guard = make_scope_guard([&]() {
-    dlclose(handle);
-  });
+  auto guard = android::base::make_scope_guard([&]() { dlclose(handle); });
   void* sym = dlsym(handle, "getRandomNumber");
   ASSERT_TRUE(sym != nullptr) << dlerror();
   int (*fn)(void);
@@ -957,6 +1110,22 @@ TEST(dlfcn, rtld_next_known_symbol) {
   ASSERT_TRUE(addr != nullptr);
 }
 
+// Check that RTLD_NEXT of a libc symbol works in dlopened library
+TEST(dlfcn, rtld_next_from_library) {
+  void* library_with_fclose = dlopen("libtest_check_rtld_next_from_library.so", RTLD_NOW | RTLD_GLOBAL);
+  ASSERT_TRUE(library_with_fclose != nullptr) << dlerror();
+  void* expected_addr = dlsym(RTLD_DEFAULT, "fclose");
+  ASSERT_TRUE(expected_addr != nullptr) << dlerror();
+  typedef void* (*get_libc_fclose_ptr_fn_t)();
+  get_libc_fclose_ptr_fn_t get_libc_fclose_ptr =
+      reinterpret_cast<get_libc_fclose_ptr_fn_t>(dlsym(library_with_fclose, "get_libc_fclose_ptr"));
+  ASSERT_TRUE(get_libc_fclose_ptr != nullptr) << dlerror();
+  ASSERT_EQ(expected_addr, get_libc_fclose_ptr());
+
+  dlclose(library_with_fclose);
+}
+
+
 TEST(dlfcn, dlsym_weak_func) {
   dlerror();
   void* handle = dlopen("libtest_dlsym_weak_func.so", RTLD_NOW);
@@ -980,8 +1149,10 @@ TEST(dlfcn, dlopen_undefined_weak_func) {
 }
 
 TEST(dlfcn, dlopen_symlink) {
+  DlfcnSymlink symlink("dlopen_symlink");
+  const std::string symlink_name = android::base::Basename(symlink.get_symlink_path());
   void* handle1 = dlopen("libdlext_test.so", RTLD_NOW);
-  void* handle2 = dlopen("libdlext_test_v2.so", RTLD_NOW);
+  void* handle2 = dlopen(symlink_name.c_str(), RTLD_NOW);
   ASSERT_TRUE(handle1 != nullptr);
   ASSERT_TRUE(handle2 != nullptr);
   ASSERT_EQ(handle1, handle2);
@@ -994,13 +1165,41 @@ TEST(dlfcn, dlopen_symlink) {
 // that calls dlopen(libc...). This is to test the situation
 // described in b/7941716.
 TEST(dlfcn, dlopen_dlopen_from_ctor) {
-#if defined(__BIONIC__)
+#if defined(__GLIBC__)
+  GTEST_SKIP() << "glibc segfaults if you try to call dlopen from a constructor";
+#endif
+
   void* handle = dlopen("libtest_dlopen_from_ctor_main.so", RTLD_NOW);
   ASSERT_TRUE(handle != nullptr) << dlerror();
   dlclose(handle);
-#else
-  GTEST_LOG_(INFO) << "This test is disabled for glibc (glibc segfaults if you try to call dlopen from a constructor).\n";
-#endif
+}
+
+static std::string g_fini_call_order_str;
+
+static void register_fini_call(const char* s) {
+  g_fini_call_order_str += s;
+}
+
+static void test_init_fini_call_order_for(const char* libname) {
+  g_fini_call_order_str.clear();
+  void* handle = dlopen(libname, RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  typedef int (*get_init_order_number_t)();
+  get_init_order_number_t get_init_order_number =
+          reinterpret_cast<get_init_order_number_t>(dlsym(handle, "get_init_order_number"));
+  ASSERT_EQ(321, get_init_order_number());
+
+  typedef void (*set_fini_callback_t)(void (*f)(const char*));
+  set_fini_callback_t set_fini_callback =
+          reinterpret_cast<set_fini_callback_t>(dlsym(handle, "set_fini_callback"));
+  set_fini_callback(register_fini_call);
+  dlclose(handle);
+  ASSERT_EQ("(root)(child)(grandchild)", g_fini_call_order_str);
+}
+
+TEST(dlfcn, init_fini_call_order) {
+  test_init_fini_call_order_for("libtest_init_fini_order_root.so");
+  test_init_fini_call_order_for("libtest_init_fini_order_root2.so");
 }
 
 TEST(dlfcn, symbol_versioning_use_v1) {
@@ -1053,6 +1252,30 @@ TEST(dlfcn, symbol_versioning_default_via_dlsym) {
   dlclose(handle);
 }
 
+TEST(dlfcn, dlvsym_smoke) {
+#if !defined(ANDROID_HOST_MUSL)
+  void* handle = dlopen("libtest_versioned_lib.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  typedef int (*fn_t)();
+
+  {
+    fn_t fn = reinterpret_cast<fn_t>(dlvsym(handle, "versioned_function", "nonversion"));
+    ASSERT_TRUE(fn == nullptr);
+    ASSERT_SUBSTR("undefined symbol: versioned_function, version nonversion", dlerror());
+  }
+
+  {
+    fn_t fn = reinterpret_cast<fn_t>(dlvsym(handle, "versioned_function", "TESTLIB_V2"));
+    ASSERT_TRUE(fn != nullptr) << dlerror();
+    ASSERT_EQ(2, fn());
+  }
+
+  dlclose(handle);
+#else
+  GTEST_SKIP() << "musl doesn't have dlvsym";
+#endif
+}
+
 // This preempts the implementation from libtest_versioned_lib.so
 extern "C" int version_zero_function() {
   return 0;
@@ -1063,7 +1286,7 @@ extern "C" int version_zero_function2() {
   return 0;
 }
 
-TEST(dlfcn, dt_runpath) {
+TEST(dlfcn, dt_runpath_smoke) {
   void* handle = dlopen("libtest_dt_runpath_d.so", RTLD_NOW);
   ASSERT_TRUE(handle != nullptr) << dlerror();
 
@@ -1076,3 +1299,413 @@ TEST(dlfcn, dt_runpath) {
 
   dlclose(handle);
 }
+
+TEST(dlfcn, dt_runpath_absolute_path) {
+  std::string libpath = GetTestLibRoot() + "/libtest_dt_runpath_d.so";
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+
+  typedef void *(* dlopen_b_fn)();
+  dlopen_b_fn fn = (dlopen_b_fn)dlsym(handle, "dlopen_b");
+  ASSERT_TRUE(fn != nullptr) << dlerror();
+
+  void *p = fn();
+  ASSERT_TRUE(p != nullptr);
+
+  dlclose(handle);
+}
+
+static void test_dlclose_after_thread_local_dtor(const char* library_name) {
+  bool is_dtor_triggered = false;
+
+  auto f = [](void* handle, bool* is_dtor_triggered) {
+    typedef void (*fn_t)(bool*);
+    fn_t fn = reinterpret_cast<fn_t>(dlsym(handle, "init_thread_local_variable"));
+    ASSERT_TRUE(fn != nullptr) << dlerror();
+
+    fn(is_dtor_triggered);
+
+    ASSERT_TRUE(!*is_dtor_triggered);
+  };
+
+  void* handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle == nullptr);
+
+  handle = dlopen(library_name, RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+
+  std::thread t(f, handle, &is_dtor_triggered);
+  t.join();
+
+  ASSERT_TRUE(is_dtor_triggered);
+  dlclose(handle);
+
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle == nullptr);
+}
+
+TEST(dlfcn, dlclose_after_thread_local_dtor) {
+  test_dlclose_after_thread_local_dtor("libtest_thread_local_dtor.so");
+}
+
+TEST(dlfcn, dlclose_after_thread_local_dtor_indirect) {
+  test_dlclose_after_thread_local_dtor("libtest_indirect_thread_local_dtor.so");
+}
+
+static void test_dlclose_before_thread_local_dtor(const char* library_name) {
+  bool is_dtor_triggered = false;
+
+  auto f = [library_name](bool* is_dtor_triggered) {
+    void* handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+    ASSERT_TRUE(handle == nullptr);
+
+    handle = dlopen(library_name, RTLD_NOW);
+    ASSERT_TRUE(handle != nullptr) << dlerror();
+
+    typedef void (*fn_t)(bool*);
+    fn_t fn = reinterpret_cast<fn_t>(dlsym(handle, "init_thread_local_variable"));
+    ASSERT_TRUE(fn != nullptr) << dlerror();
+
+    fn(is_dtor_triggered);
+
+    dlclose(handle);
+
+    ASSERT_TRUE(!*is_dtor_triggered);
+
+    // Since we have thread_atexit dtors associated with handle - the library should
+    // still be availabe.
+    handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+    ASSERT_TRUE(handle != nullptr) << dlerror();
+    dlclose(handle);
+  };
+
+  void* handle = dlopen(library_name, RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  dlclose(handle);
+
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle == nullptr);
+
+  std::thread t(f, &is_dtor_triggered);
+  t.join();
+#if defined(__BIONIC__)
+  // ld-android.so unloads unreferenced libraries on pthread_exit()
+  ASSERT_TRUE(is_dtor_triggered);
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle == nullptr);
+#else
+  // GLIBC does not unload libraries with ref_count = 0 on pthread_exit
+  ASSERT_TRUE(is_dtor_triggered);
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+#endif
+}
+
+TEST(dlfcn, dlclose_before_thread_local_dtor) {
+  test_dlclose_before_thread_local_dtor("libtest_thread_local_dtor.so");
+}
+
+TEST(dlfcn, dlclose_before_thread_local_dtor_indirect) {
+  test_dlclose_before_thread_local_dtor("libtest_indirect_thread_local_dtor.so");
+}
+
+TEST(dlfcn, dlclose_before_thread_local_dtor_multiple_dsos) {
+  const constexpr char* library_name = "libtest_indirect_thread_local_dtor.so";
+
+  bool is_dtor1_triggered = false;
+  bool is_dtor2_triggered = false;
+
+  std::mutex mtx;
+  std::condition_variable cv;
+  void* library_handle = nullptr;
+  bool thread1_dlopen_complete = false;
+  bool thread2_thread_local_dtor_initialized = false;
+  bool thread1_complete = false;
+
+  auto f1 = [&]() {
+    void* handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+    ASSERT_TRUE(handle == nullptr);
+
+    handle = dlopen(library_name, RTLD_NOW);
+    ASSERT_TRUE(handle != nullptr) << dlerror();
+    std::unique_lock<std::mutex> lock(mtx);
+    thread1_dlopen_complete = true;
+    library_handle = handle;
+    lock.unlock();
+    cv.notify_one();
+
+    typedef void (*fn_t)(bool*);
+    fn_t fn = reinterpret_cast<fn_t>(dlsym(handle, "init_thread_local_variable"));
+    ASSERT_TRUE(fn != nullptr) << dlerror();
+
+    fn(&is_dtor1_triggered);
+
+    lock.lock();
+    cv.wait(lock, [&] { return thread2_thread_local_dtor_initialized; });
+    lock.unlock();
+
+    dlclose(handle);
+
+    ASSERT_TRUE(!is_dtor1_triggered);
+
+    // Since we have thread_atexit dtors associated with handle - the library should
+    // still be availabe.
+    handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+    ASSERT_TRUE(handle != nullptr) << dlerror();
+    dlclose(handle);
+  };
+
+  auto f2 = [&]() {
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait(lock, [&] { return thread1_dlopen_complete; });
+    void* handle = library_handle;
+    lock.unlock();
+
+    typedef void (*fn_t)(bool*);
+    fn_t fn = reinterpret_cast<fn_t>(dlsym(handle, "init_thread_local_variable2"));
+    ASSERT_TRUE(fn != nullptr) << dlerror();
+
+    fn(&is_dtor2_triggered);
+
+    lock.lock();
+    thread2_thread_local_dtor_initialized = true;
+    lock.unlock();
+    cv.notify_one();
+
+    lock.lock();
+    cv.wait(lock, [&] { return thread1_complete; });
+    lock.unlock();
+
+    ASSERT_TRUE(!is_dtor2_triggered);
+  };
+
+  void* handle = dlopen(library_name, RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  dlclose(handle);
+
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle == nullptr);
+
+  std::thread t1(f1);
+  std::thread t2(f2);
+  t1.join();
+  ASSERT_TRUE(is_dtor1_triggered);
+  ASSERT_TRUE(!is_dtor2_triggered);
+
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+  dlclose(handle);
+
+  std::unique_lock<std::mutex> lock(mtx);
+  thread1_complete = true;
+  lock.unlock();
+  cv.notify_one();
+
+  t2.join();
+  ASSERT_TRUE(is_dtor2_triggered);
+
+#if defined(__BIONIC__)
+  // ld-android.so unloads unreferenced libraries on pthread_exit()
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle == nullptr);
+#else
+  // GLIBC does not unload libraries with ref_count = 0 on pthread_exit
+  handle = dlopen(library_name, RTLD_NOW | RTLD_NOLOAD);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+#endif
+}
+
+TEST(dlfcn, RTLD_macros) {
+#if !defined(RTLD_LOCAL)
+#error no RTLD_LOCAL
+#elif !defined(RTLD_LAZY)
+#error no RTLD_LAZY
+#elif !defined(RTLD_NOW)
+#error no RTLD_NOW
+#elif !defined(RTLD_NOLOAD)
+#error no RTLD_NOLOAD
+#elif !defined(RTLD_GLOBAL)
+#error no RTLD_GLOBAL
+#elif !defined(RTLD_NODELETE)
+#error no RTLD_NODELETE
+#endif
+}
+
+// Bionic specific tests
+#if defined(__BIONIC__)
+
+#if defined(__arm__)
+
+void validate_compatibility_of_native_library(const std::string& soname, const std::string& path) {
+  // Grab the dynamic section in text form...
+  ExecTestHelper eth;
+  eth.SetArgs({"readelf", "-dW", path.c_str(), nullptr});
+  eth.Run([&]() { execvpe("readelf", eth.GetArgs(), eth.GetEnv()); }, 0, nullptr);
+  std::string output = eth.GetOutput();
+
+  // Check that there *is* a legacy DT_HASH (not just a GNU hash)...
+  ASSERT_TRUE(std::regex_search(output, std::regex("\\(HASH\\)"))) << output;
+  // Check that there is no DT_ANDROID_REL or DT_ANDROID_RELA...
+  ASSERT_FALSE(std::regex_search(output, std::regex("\\(ANDROID_REL\\)"))) << output;
+  ASSERT_FALSE(std::regex_search(output, std::regex("\\(ANDROID_RELA\\)"))) << output;
+
+  // Check that we have regular non-packed relocations.
+  // libdl.so is simple enough that it doesn't have any relocations.
+  ASSERT_TRUE(std::regex_search(output, std::regex("\\(RELA?\\)")) || soname == "libdl.so")
+      << output;
+}
+
+void validate_compatibility_of_native_library(const std::string& soname) {
+  // On the systems with emulation system libraries would be of different
+  // architecture.  Try to use alternate paths first.
+  std::string path = std::string(ALTERNATE_PATH_TO_SYSTEM_LIB) + soname;
+  if (access(path.c_str(), R_OK) != 0) {
+    path = std::string(PATH_TO_SYSTEM_LIB) + soname;
+    ASSERT_EQ(0, access(path.c_str(), R_OK));
+  }
+  validate_compatibility_of_native_library(soname, path);
+}
+
+// This is a test for app compatibility workaround for arm apps
+// affected by http://b/24465209
+TEST(dlext, compat_elf_hash_and_relocation_tables) {
+  validate_compatibility_of_native_library("libc.so");
+  validate_compatibility_of_native_library("liblog.so");
+  validate_compatibility_of_native_library("libstdc++.so");
+  validate_compatibility_of_native_library("libdl.so");
+  validate_compatibility_of_native_library("libm.so");
+  validate_compatibility_of_native_library("libz.so");
+  validate_compatibility_of_native_library("libjnigraphics.so");
+}
+
+#endif //  defined(__arm__)
+
+TEST(dlfcn, dlopen_invalid_rw_load_segment) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-rw_load_segment.so";
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has load segments that are both writable and executable";
+  ASSERT_STREQ(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_unaligned_shdr_offset) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-unaligned_shdr_offset.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has invalid shdr offset/size: ";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_zero_shentsize) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-zero_shentsize.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has unsupported e_shentsize: 0x0 (expected 0x";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_zero_shstrndx) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-zero_shstrndx.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has invalid e_shstrndx";
+  ASSERT_STREQ(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_empty_shdr_table) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-empty_shdr_table.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has no section headers";
+  ASSERT_STREQ(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_zero_shdr_table_offset) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-zero_shdr_table_offset.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has invalid shdr offset/size: 0/";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_zero_shdr_table_content) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-zero_shdr_table_content.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" .dynamic section header was not found";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_textrels) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-textrels.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has text relocations";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_textrels2) {
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-textrels2.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+  std::string expected_dlerror = std::string("dlopen failed: \"") + libpath + "\" has text relocations";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+}
+
+TEST(dlfcn, dlopen_invalid_local_tls) {
+#if defined(__riscv)
+  // This is a test for bad gold behavior, and gold doesn't support riscv64.
+#else
+  const std::string libpath = GetPrebuiltElfDir() + "/libtest_invalid-local-tls.so";
+
+  void* handle = dlopen(libpath.c_str(), RTLD_NOW);
+  ASSERT_TRUE(handle == nullptr);
+#if defined(__arm__)
+  const char* referent = "local section";
+#else
+  const char* referent = "local symbol \"tls_var_2\"";
+#endif
+  std::string expected_dlerror = std::string("dlopen failed: unexpected TLS reference to ") +
+                                 referent + " in \"" + libpath + "\"";
+  ASSERT_SUBSTR(expected_dlerror.c_str(), dlerror());
+#endif
+}
+
+TEST(dlfcn, dlopen_df_1_global) {
+  void* handle = dlopen("libtest_dlopen_df_1_global.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+}
+
+TEST(dlfcn, segment_gap) {
+  void* handle = dlopen("libsegment_gap_outer.so", RTLD_NOW);
+  ASSERT_TRUE(handle != nullptr) << dlerror();
+
+  auto get_inner = reinterpret_cast<void* (*)()>(dlsym(handle, "get_inner"));
+  void* inner = get_inner();
+  (void)inner;
+
+#if __arm__
+  int count;
+  _Unwind_Ptr outer_exidx = dl_unwind_find_exidx(reinterpret_cast<_Unwind_Ptr>(get_inner), &count);
+  _Unwind_Ptr inner_exidx = dl_unwind_find_exidx(reinterpret_cast<_Unwind_Ptr>(inner), &count);
+  EXPECT_NE(0u, outer_exidx);
+  EXPECT_NE(0u, inner_exidx);
+  EXPECT_NE(inner_exidx, outer_exidx);
+#endif
+
+  Dl_info info;
+  int rc = dladdr(inner, &info);
+  ASSERT_NE(rc, 0);
+
+  EXPECT_NE(nullptr, strstr(info.dli_fname, "libsegment_gap_inner.so"));
+}
+
+#endif

@@ -25,11 +25,11 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #include <string.h>
 #include <stdint.h>
-#include <machine/cpu-features.h>
 
-size_t strlen(const char *s)
+size_t strlen_generic(const char *s)
 {
     __builtin_prefetch(s);
     __builtin_prefetch(s+32);
@@ -67,53 +67,46 @@ size_t strlen(const char *s)
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
+        "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
 #if !defined(__OPTIMIZE_SIZE__)
-        "bne     1f                         \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
         "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
         "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
         "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
         "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
         "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
         "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
         "sub     %[t], %[v], %[mask], lsr #7\n"
         "and     %[t], %[t], %[mask]        \n"
         "bics    %[t], %[t], %[v]           \n"
-        "it      eq                         \n"
-        "ldreq   %[v], [%[s]], #4           \n"
+        "bne     1f                         \n"
+        "ldr     %[v], [%[s]], #4           \n"
 #endif
-        "beq     0b                         \n"
+        "b       0b                         \n"
         "1:                                 \n"
         "add     %[l], %[l], %[s]           \n"
         "tst     %[v], #0xFF                \n"
@@ -123,8 +116,8 @@ size_t strlen(const char *s)
         "beq     2f                         \n"
         "add     %[l], %[l], #1             \n"
         "tst     %[v], #0xFF0000            \n"
-        "it      ne                         \n"
-        "addne   %[l], %[l], #1             \n"
+        "beq     2f                         \n"
+        "add     %[l], %[l], #1             \n"
         "2:                                 \n"
         : [l]"=&r"(l), [v]"=&r"(v), [t]"=&r"(t), [s]"=&r"(u.b)
         : "%[l]"(l), "%[s]"(u.b), [mask]"r"(0x80808080UL)

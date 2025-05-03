@@ -26,22 +26,27 @@
 ###     Skip the step that generates all of the include files.
 ###   --download-kernel
 ###     Automatically create a temporary git repository and check out the
-###     Android kernel source code.
+###     linux kernel source code at TOT.
 ###   --use-kernel-dir <DIR>
 ###     Do not check out the kernel source, use the kernel directory
 ###     pointed to by <DIR>.
+###   --verify-modified-headers-only <DIR>
+###     Do not build anything, simply verify that the set of modified
+###     kernel headers have not changed.
 
 # Terminate the script if any command fails.
 set -eE
 
 TMPDIR=""
 ANDROID_DIR=""
-KERNEL_VERSION="android-3.10"
+ANDROID_KERNEL_REPO="https://android.googlesource.com/kernel/common/"
+ANDROID_KERNEL_BRANCH="android-mainline"
 KERNEL_DIR=""
 KERNEL_DOWNLOAD=0
-ARCH_LIST=("arm" "arm64" "mips" "x86")
+ARCH_LIST=("arm" "arm64" "riscv" "x86")
 ANDROID_KERNEL_DIR="external/kernel-headers/original"
 SKIP_GENERATION=0
+VERIFY_HEADERS_ONLY=0
 
 function cleanup () {
   if [[ "${TMPDIR}" =~ /tmp ]] && [[ -d "${TMPDIR}" ]]; then
@@ -99,7 +104,7 @@ function copy_if_exists () {
   done
 }
 
-function check_hdrs () {
+function verify_modified_hdrs () {
   local src_dir=$1
   local tgt_dir=$2
   local kernel_dir=$3
@@ -124,7 +129,7 @@ function check_hdrs () {
   done
 
   for dir in "${search_dirs[@]}"; do
-    check_hdrs "${dir}" ${tgt_dir}/$(basename ${dir}) "${kernel_dir}"
+    verify_modified_hdrs "${dir}" ${tgt_dir}/$(basename ${dir}) "${kernel_dir}"
   done
 }
 
@@ -148,6 +153,16 @@ while [ $# -gt 0 ]; do
       shift
       KERNEL_DIR="$1"
       KERNEL_DOWNLOAD=0
+      ;;
+    "--verify-modified-headers-only")
+      if [[ $# -lt 2 ]]; then
+        echo "--verify-modified-headers-only requires an argument."
+        exit 1
+      fi
+      shift
+      KERNEL_DIR="$1"
+      KERNEL_DOWNLOAD=0
+      VERIFY_HEADERS_ONLY=1
       ;;
     "-h" | "--help")
       usage
@@ -177,67 +192,88 @@ elif [[ ! -d "${ANDROID_KERNEL_DIR}" ]]; then
   exit 1
 fi
 
-if [[ -d "${KERNEL_DIR}/linux-stable" ]]; then
-  src_dir="linux-stable"
-else
-  src_dir="common"
-fi
-
 if [[ ${KERNEL_DOWNLOAD} -eq 1 ]]; then
   TMPDIR=$(mktemp -d /tmp/android_kernelXXXXXXXX)
   cd "${TMPDIR}"
-  echo "Fetching android kernel source ${KERNEL_VERSION}"
-  git clone https://android.googlesource.com/kernel/common.git
-  cd "${src_dir}"
-  git checkout "${KERNEL_VERSION}"
-  KERNEL_DIR="${TMPDIR}"
+  echo "Fetching android linux kernel source..."
+  git clone ${ANDROID_KERNEL_REPO} -b ${ANDROID_KERNEL_BRANCH} --depth=1
+  cd common
+  KERNEL_DIR="${TMPDIR}/common"
 elif [[ "${KERNEL_DIR}" == "" ]]; then
   echo "Must specify one of --use-kernel-dir or --download-kernel."
   exit 1
-elif [[ ! -d "${KERNEL_DIR}" ]] || [[ ! -d "${KERNEL_DIR}/${src_dir}" ]]; then
-  echo "The kernel directory $KERNEL_DIR or $KERNEL_DIR/${src_dir} does not exist."
+elif [[ ! -d "${KERNEL_DIR}" ]] || [[ ! -d "${KERNEL_DIR}/kernel" ]]; then
+  echo "The kernel directory $KERNEL_DIR or $KERNEL_DIR/kernel does not exist."
   exit 1
 else
-  cd "${KERNEL_DIR}/${src_dir}"
+  cd "${KERNEL_DIR}"
+fi
+
+if [[ ${VERIFY_HEADERS_ONLY} -eq 1 ]]; then
+  # Verify if modified headers have changed.
+  verify_modified_hdrs "${KERNEL_DIR}/include/scsi" \
+                       "${ANDROID_KERNEL_DIR}/scsi" \
+                       "${KERNEL_DIR}"
+  exit 0
 fi
 
 if [[ ${SKIP_GENERATION} -eq 0 ]]; then
   # Build all of the generated headers.
   for arch in "${ARCH_LIST[@]}"; do
     echo "Generating headers for arch ${arch}"
+    # Clean up any leftover headers.
+    make ARCH=${arch} distclean
     make ARCH=${arch} headers_install
   done
 fi
 
+# Completely delete the old original headers so that any deleted/moved
+# headers are also removed.
+rm -rf "${ANDROID_KERNEL_DIR}/uapi"
+mkdir -p "${ANDROID_KERNEL_DIR}/uapi"
+
 cd ${ANDROID_BUILD_TOP}
 
 # Copy all of the include/uapi files to the kernel headers uapi directory.
-copy_hdrs "${KERNEL_DIR}/${src_dir}/include/uapi" "${ANDROID_KERNEL_DIR}/uapi"
+copy_hdrs "${KERNEL_DIR}/include/uapi" "${ANDROID_KERNEL_DIR}/uapi"
 
 # Copy the staging files to uapi/linux.
-copy_hdrs "${KERNEL_DIR}/${src_dir}/drivers/staging/android/uapi" \
+copy_hdrs "${KERNEL_DIR}/drivers/staging/android/uapi" \
           "${ANDROID_KERNEL_DIR}/uapi/linux" "no-copy-dirs"
 
+# Remove ion.h, it's not fully supported by the upstream kernel (see b/77976082).
+rm -f "${ANDROID_KERNEL_DIR}/uapi/linux/ion.h"
+
 # Copy the generated headers.
-copy_hdrs "${KERNEL_DIR}/${src_dir}/include/generated/uapi" \
+copy_hdrs "${KERNEL_DIR}/include/generated/uapi" \
           "${ANDROID_KERNEL_DIR}/uapi"
 
 for arch in "${ARCH_LIST[@]}"; do
   # Copy arch headers.
-  copy_hdrs "${KERNEL_DIR}/${src_dir}/arch/${arch}/include/uapi" \
+  copy_hdrs "${KERNEL_DIR}/arch/${arch}/include/uapi" \
             "${ANDROID_KERNEL_DIR}/uapi/asm-${arch}"
   # Copy the generated arch headers.
-  copy_hdrs "${KERNEL_DIR}/${src_dir}/arch/${arch}/include/generated/uapi" \
+  copy_hdrs "${KERNEL_DIR}/arch/${arch}/include/generated/uapi" \
             "${ANDROID_KERNEL_DIR}/uapi/asm-${arch}"
 
   # Special copy of generated header files from arch/<ARCH>/generated/asm that
   # also exist in uapi/asm-generic.
-  copy_if_exists "${KERNEL_DIR}/${src_dir}/include/uapi/asm-generic" \
-                 "${KERNEL_DIR}/${src_dir}/arch/${arch}/include/generated/asm" \
+  copy_if_exists "${KERNEL_DIR}/include/uapi/asm-generic" \
+                 "${KERNEL_DIR}/arch/${arch}/include/generated/asm" \
                  "${ANDROID_KERNEL_DIR}/uapi/asm-${arch}/asm"
 done
 
 # Verify if modified headers have changed.
-check_hdrs "${KERNEL_DIR}/${src_dir}/include/scsi" \
-           "${ANDROID_KERNEL_DIR}/scsi" \
-           "${KERNEL_DIR}/${src_dir}"
+verify_modified_hdrs "${KERNEL_DIR}/include/scsi" \
+                     "${ANDROID_KERNEL_DIR}/scsi" \
+                     "${KERNEL_DIR}"
+echo "Headers updated."
+
+if [[ ${SKIP_GENERATION} -eq 0 ]]; then
+  cd "${KERNEL_DIR}"
+  # Clean all of the generated headers.
+  for arch in "${ARCH_LIST[@]}"; do
+    echo "Cleaning kernel files for arch ${arch}"
+    make ARCH=${arch} distclean
+  done
+fi

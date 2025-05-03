@@ -107,10 +107,7 @@
 #include <syslog.h>
 #include <stdarg.h>
 #include "nsswitch.h"
-
-#ifdef ANDROID_CHANGES
-#include <sys/system_properties.h>
-#endif /* ANDROID_CHANGES */
+#include "private/bionic_defs.h"
 
 typedef union sockaddr_union {
     struct sockaddr     generic;
@@ -134,8 +131,10 @@ static const char in6_loopback[] = {
 };
 #endif
 
+#if defined(__ANDROID__)
 // This should be synchronized to ResponseCode.h
 static const int DnsProxyQueryResult = 222;
+#endif
 
 static const struct afd {
 	int a_af;
@@ -200,7 +199,7 @@ static const ns_src default_dns_files[] = {
 	{ 0, 0 }
 };
 
-#define MAXPACKET	(64*1024)
+#define MAXPACKET	(8*1024)
 
 typedef union {
 	HEADER hdr;
@@ -312,6 +311,7 @@ do { 								\
 #define MATCH(x, y, w) 							\
 	((x) == (y) || (/*CONSTCOND*/(w) && ((x) == ANY || (y) == ANY)))
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 const char *
 gai_strerror(int ecode)
 {
@@ -320,12 +320,13 @@ gai_strerror(int ecode)
 	return ai_errlist[ecode];
 }
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 void
 freeaddrinfo(struct addrinfo *ai)
 {
 	struct addrinfo *next;
 
-#if __ANDROID__
+#if defined(__BIONIC__)
 	if (ai == NULL) return;
 #else
 	_DIAGASSERT(ai != NULL);
@@ -399,6 +400,7 @@ bool readBE32(FILE* fp, int32_t* result) {
   return true;
 }
 
+#if defined(__ANDROID__)
 // Returns 0 on success, else returns on error.
 static int
 android_getaddrinfo_proxy(
@@ -420,11 +422,10 @@ android_getaddrinfo_proxy(
 		return EAI_NODATA;
 	}
 
-	FILE* proxy = android_open_proxy();
+	FILE* proxy = fdopen(__netdClientDispatch.dnsOpenProxy(), "r+");
 	if (proxy == NULL) {
 		return EAI_SYSTEM;
 	}
-
 	netid = __netdClientDispatch.netIdForResolv(netid);
 
 	// Send the request.
@@ -469,7 +470,7 @@ android_getaddrinfo_proxy(
 			break;
 		}
 
-		struct addrinfo* ai = calloc(1, sizeof(struct addrinfo) + sizeof(struct sockaddr_storage));
+		ai = calloc(1, sizeof(struct addrinfo) + sizeof(struct sockaddr_storage));
 		if (ai == NULL) {
 			break;
 		}
@@ -555,7 +556,9 @@ exit:
 	}
 	return EAI_NODATA;
 }
+#endif
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int
 getaddrinfo(const char *hostname, const char *servname,
     const struct addrinfo *hints, struct addrinfo **res)
@@ -563,6 +566,7 @@ getaddrinfo(const char *hostname, const char *servname,
 	return android_getaddrinfofornet(hostname, servname, hints, NETID_UNSET, MARK_UNSET, res);
 }
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int
 android_getaddrinfofornet(const char *hostname, const char *servname,
     const struct addrinfo *hints, unsigned netid, unsigned mark, struct addrinfo **res)
@@ -577,6 +581,7 @@ android_getaddrinfofornet(const char *hostname, const char *servname,
 	return android_getaddrinfofornetcontext(hostname, servname, hints, &netcontext, res);
 }
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int
 android_getaddrinfofornetcontext(const char *hostname, const char *servname,
     const struct addrinfo *hints, const struct android_net_context *netcontext,
@@ -1290,6 +1295,17 @@ ip6_str2scopeid(char *scope, struct sockaddr_in6 *sin6, u_int32_t *scopeid)
 static const char AskedForGot[] =
 	"gethostby*.getanswer: asked for \"%s\", got \"%s\"";
 
+#define BOUNDED_INCR(x) \
+	do { \
+		BOUNDS_CHECK(cp, x); \
+		cp += (x); \
+	} while (/*CONSTCOND*/0)
+
+#define BOUNDS_CHECK(ptr, count) \
+	do { \
+		if (eom - (ptr) < (count)) { h_errno = NO_RECOVERY; return NULL; } \
+	} while (/*CONSTCOND*/0)
+
 static struct addrinfo *
 getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
     const struct addrinfo *pai)
@@ -1335,7 +1351,8 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 	qdcount = ntohs(hp->qdcount);
 	bp = hostbuf;
 	ep = hostbuf + sizeof hostbuf;
-	cp = answer->buf + HFIXEDSZ;
+	cp = answer->buf;
+	BOUNDED_INCR(HFIXEDSZ);
 	if (qdcount != 1) {
 		h_errno = NO_RECOVERY;
 		return (NULL);
@@ -1345,7 +1362,7 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 		h_errno = NO_RECOVERY;
 		return (NULL);
 	}
-	cp += n + QFIXEDSZ;
+	BOUNDED_INCR(n + QFIXEDSZ);
 	if (qtype == T_A || qtype == T_AAAA || qtype == T_ANY) {
 		/* res_send() has already verified that the query name is the
 		 * same as the one we sent; this just gets the expanded name
@@ -1370,12 +1387,14 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 			continue;
 		}
 		cp += n;			/* name */
+		BOUNDS_CHECK(cp, 3 * INT16SZ + INT32SZ);
 		type = _getshort(cp);
  		cp += INT16SZ;			/* type */
 		class = _getshort(cp);
  		cp += INT16SZ + INT32SZ;	/* class, TTL */
 		n = _getshort(cp);
 		cp += INT16SZ;			/* len */
+		BOUNDS_CHECK(cp, n);
 		if (class != C_IN) {
 			/* XXX - debug? syslog? */
 			cp += n;
@@ -1791,10 +1810,14 @@ _find_src_addr(const struct sockaddr *addr, struct sockaddr *src_addr, unsigned 
 			return -1;
 		}
 	}
-	if (mark != MARK_UNSET && setsockopt(sock, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) < 0)
+	if (mark != MARK_UNSET && setsockopt(sock, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) < 0) {
+		close(sock);
 		return 0;
-	if (uid > 0 && uid != NET_CONTEXT_INVALID_UID && fchown(sock, uid, (gid_t)-1) < 0)
+	}
+	if (uid > 0 && uid != NET_CONTEXT_INVALID_UID && fchown(sock, uid, (gid_t)-1) < 0) {
+		close(sock);
 		return 0;
+	}
 	do {
 		ret = __connect(sock, addr, len);
 	} while (ret == -1 && errno == EINTR);
@@ -1963,8 +1986,7 @@ _dns_getaddrinfo(void *rv, void	*cb_data, va_list ap)
 	 * fully populate the thread private data here, but if we get down there
 	 * and have a cache hit that would be wasted, so we do the rest there on miss
 	 */
-	res_setnetid(res, netcontext->dns_netid);
-	res_setmark(res, netcontext->dns_mark);
+	res_setnetcontext(res, netcontext);
 	if (res_searchN(name, &q, res) < 0) {
 		__res_put_state(res);
 		free(buf);
@@ -2154,8 +2176,12 @@ res_queryN(const char *name, /* domain name */ struct res_target *target,
 		int class, type;
 		u_char *answer;
 		int anslen;
+		u_int oflags;
 
 		hp = (HEADER *)(void *)t->answer;
+		oflags = res->_flags;
+
+again:
 		hp->rcode = NOERROR;	/* default */
 
 		/* make it easier... */
@@ -2171,7 +2197,8 @@ res_queryN(const char *name, /* domain name */ struct res_target *target,
 		n = res_nmkquery(res, QUERY, name, class, type, NULL, 0, NULL,
 		    buf, sizeof(buf));
 #ifdef RES_USE_EDNS0
-		if (n > 0 && (res->options & RES_USE_EDNS0) != 0)
+		if (n > 0 && (res->_flags & RES_F_EDNS0ERR) == 0 &&
+		    (res->options & (RES_USE_EDNS0|RES_USE_DNSSEC)) != 0)
 			n = res_nopt(res, n, buf, sizeof(buf), anslen);
 #endif
 		if (n <= 0) {
@@ -2196,6 +2223,18 @@ res_queryN(const char *name, /* domain name */ struct res_target *target,
 
 		if (n < 0 || hp->rcode != NOERROR || ntohs(hp->ancount) == 0) {
 			rcode = hp->rcode;	/* record most recent error */
+#ifdef RES_USE_EDNS0
+			/* if the query choked with EDNS0, retry without EDNS0 */
+			if ((res->options & (RES_USE_EDNS0|RES_USE_DNSSEC)) != 0 &&
+			    ((oflags ^ res->_flags) & RES_F_EDNS0ERR) != 0) {
+				res->_flags |= RES_F_EDNS0ERR;
+#ifdef DEBUG
+				if (res->options & RES_DEBUG)
+					printf(";; res_nquery: retry without EDNS0\n");
+#endif
+				goto again;
+			}
+#endif
 #ifdef DEBUG
 			if (res->options & RES_DEBUG)
 				printf(";; rcode = %u, ancount=%u\n", hp->rcode,

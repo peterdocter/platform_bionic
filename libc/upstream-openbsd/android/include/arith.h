@@ -14,9 +14,11 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #define IEEE_8087
 
-#if __LP64__
+#if defined(__LP64__)
 #define Long int
 #endif
 

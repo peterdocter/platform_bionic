@@ -23,6 +23,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include "utils.h"
+
 TEST(sys_select, fd_set_smoke) {
   fd_set fds;
   FD_ZERO(&fds);
@@ -68,7 +70,8 @@ static void DelayedWriteCleanup(int pid, int fd) {
   char buf[sizeof(DELAY_MSG)];
   ASSERT_EQ(static_cast<ssize_t>(sizeof(DELAY_MSG)), read(fd, buf, sizeof(DELAY_MSG)));
   ASSERT_STREQ(DELAY_MSG, buf);
-  ASSERT_EQ(pid, waitpid(pid, NULL, 0));
+
+  AssertChildExited(pid, 0);
 }
 
 TEST(sys_select, select_smoke) {
@@ -86,17 +89,26 @@ TEST(sys_select, select_smoke) {
   int max = STDERR_FILENO + 1;
 
   // Invalid max fd.
-  ASSERT_EQ(-1, select(-1, &r, &w, &e, NULL));
-  ASSERT_EQ(EINVAL, errno);
+  ASSERT_EQ(-1, select(-1, &r, &w, &e, nullptr));
+  ASSERT_ERRNO(EINVAL);
 
-  ASSERT_EQ(2, select(max, &r, &w, &e, NULL));
+  int num_fds = select(max, &r, &w, &e, nullptr);
+  // If there is data to be read on STDIN, then the number of
+  // fds ready will be 3 instead of 2. Allow this case, but verify
+  // every fd that is set.
+  ASSERT_TRUE(num_fds == 2 || num_fds == 3) << "Num fds returned " << num_fds;
+  ASSERT_TRUE(FD_ISSET(STDOUT_FILENO, &w));
+  ASSERT_TRUE(FD_ISSET(STDERR_FILENO, &w));
+  if (num_fds == 3) {
+    ASSERT_TRUE(FD_ISSET(STDIN_FILENO, &r));
+  }
 
   // Invalid timeout.
   timeval tv;
   tv.tv_sec = -1;
   tv.tv_usec = 0;
   ASSERT_EQ(-1, select(max, &r, &w, &e, &tv));
-  ASSERT_EQ(EINVAL, errno);
+  ASSERT_ERRNO(EINVAL);
 
   // Valid timeout...
   tv.tv_sec = 1;
@@ -105,7 +117,7 @@ TEST(sys_select, select_smoke) {
 
   FD_ZERO(&r);
   FD_SET(fd, &r);
-  ASSERT_EQ(1, select(fd+1, &r, NULL, NULL, &tv));
+  ASSERT_EQ(1, select(fd+1, &r, nullptr, nullptr, &tv));
   // Both tv_sec and tv_nsec should have been updated.
   ASSERT_EQ(0, tv.tv_sec);
   ASSERT_NE(0, tv.tv_usec);
@@ -132,17 +144,26 @@ TEST(sys_select, pselect_smoke) {
   int max = STDERR_FILENO + 1;
 
   // Invalid max fd.
-  ASSERT_EQ(-1, pselect(-1, &r, &w, &e, NULL, &ss));
-  ASSERT_EQ(EINVAL, errno);
+  ASSERT_EQ(-1, pselect(-1, &r, &w, &e, nullptr, &ss));
+  ASSERT_ERRNO(EINVAL);
 
-  ASSERT_EQ(2, pselect(max, &r, &w, &e, NULL, &ss));
+  // If there is data to be read on STDIN, then the number of
+  // fds ready will be 3 instead of 2. Allow this case, but verify
+  // every fd that is set.
+  int num_fds = pselect(max, &r, &w, &e, nullptr, &ss);
+  ASSERT_TRUE(num_fds == 2 || num_fds == 3) << "Num fds returned " << num_fds;
+  ASSERT_TRUE(FD_ISSET(STDOUT_FILENO, &w));
+  ASSERT_TRUE(FD_ISSET(STDERR_FILENO, &w));
+  if (num_fds == 3) {
+    ASSERT_TRUE(FD_ISSET(STDIN_FILENO, &r));
+  }
 
   // Invalid timeout.
   timespec tv;
   tv.tv_sec = -1;
   tv.tv_nsec = 0;
   ASSERT_EQ(-1, pselect(max, &r, &w, &e, &tv, &ss));
-  ASSERT_EQ(EINVAL, errno);
+  ASSERT_ERRNO(EINVAL);
 
   // Valid timeout...
   tv.tv_sec = 1;
@@ -151,10 +172,15 @@ TEST(sys_select, pselect_smoke) {
 
   FD_ZERO(&r);
   FD_SET(fd, &r);
-  ASSERT_EQ(1, pselect(fd+1, &r, NULL, NULL, &tv, NULL));
+  ASSERT_EQ(1, pselect(fd+1, &r, nullptr, nullptr, &tv, nullptr));
   // Neither tv_sec nor tv_nsec should have been updated.
   ASSERT_EQ(1, tv.tv_sec);
   ASSERT_EQ(0, tv.tv_nsec);
 
   DelayedWriteCleanup(pid, fd);
+}
+
+TEST(sys_select, FD_ISSET_const) {
+  const fd_set none = {};
+  ASSERT_FALSE(FD_ISSET(atoi("0"), &none));
 }

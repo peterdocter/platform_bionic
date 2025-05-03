@@ -27,7 +27,6 @@
  */
 
 #include <private/bionic_asm.h>
-#include <private/libc_events.h>
 
 /*
  * This code assumes it is running on a processor that supports all arm v7
@@ -40,43 +39,15 @@
         .thumb
         .thumb_func
 
-ENTRY(__memcpy_chk)
-        cmp         r2, r3
-        bhi         __memcpy_chk_fail
-
-        // Fall through to memcpy...
-END(__memcpy_chk)
-
-ENTRY(memcpy)
+ENTRY(__memcpy_a9)
         pld     [r1, #0]
         stmfd   sp!, {r0, lr}
         .cfi_def_cfa_offset 8
         .cfi_rel_offset r0, 0
         .cfi_rel_offset lr, 4
         pld     [r1, #64]
-END(memcpy)
+END(__memcpy_a9)
 
-#define MEMCPY_BASE         __memcpy_base
-#define MEMCPY_BASE_ALIGNED __memcpy_base_aligned
+#define MEMCPY_BASE         __memcpy_base_a9
+#define MEMCPY_BASE_ALIGNED __memcpy_base_aligned_a9
 #include "memcpy_base.S"
-
-ENTRY_PRIVATE(__memcpy_chk_fail)
-        // Preserve lr for backtrace.
-        push    {lr}
-        .cfi_def_cfa_offset 4
-        .cfi_rel_offset lr, 0
-
-        ldr     r0, error_message
-        ldr     r1, error_code
-1:
-        add     r0, pc
-        bl      __fortify_chk_fail
-error_code:
-        .word   BIONIC_EVENT_MEMCPY_BUFFER_OVERFLOW
-error_message:
-        .word   error_string-(1b+4)
-END(__memcpy_chk_fail)
-
-        .data
-error_string:
-        .string     "memcpy: prevented write past end of buffer"

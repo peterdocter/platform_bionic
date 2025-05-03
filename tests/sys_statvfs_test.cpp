@@ -25,11 +25,29 @@
 #include <string>
 
 template <typename StatVfsT> void Check(StatVfsT& sb) {
-  EXPECT_EQ(4096U, sb.f_bsize);
+#if defined(__x86_64__)
+  // On x86_64 based 16kb page size targets, the page size in userspace is simulated to 16kb but
+  // the underlying filesystem block size would remain unchanged, i.e., 4kb.
+  // For more info:
+  // https://source.android.com/docs/core/architecture/16kb-page-size/getting-started-cf-x86-64-pgagnostic
+  EXPECT_EQ(4096, static_cast<int>(sb.f_bsize));
+#else
+  EXPECT_EQ(getpagesize(), static_cast<int>(sb.f_bsize));
+#endif
   EXPECT_EQ(0U, sb.f_bfree);
   EXPECT_EQ(0U, sb.f_ffree);
-  EXPECT_EQ(0U, sb.f_fsid);
   EXPECT_EQ(255U, sb.f_namemax);
+
+  // Linux 6.7 requires that all filesystems have a non-zero fsid.
+  if (sb.f_fsid != 0U) {
+    // fs/libfs.c reuses the filesystem's device number.
+    struct stat proc_sb;
+    ASSERT_EQ(0, stat("/proc", &proc_sb));
+    EXPECT_EQ(proc_sb.st_dev, sb.f_fsid);
+  } else {
+    // Prior to that, the fsid for /proc was just 0.
+    EXPECT_EQ(0U, sb.f_fsid);
+  }
 
   // The kernel sets a private bit to indicate that f_flags is valid.
   // This flag is not supposed to be exposed to libc clients.
@@ -43,7 +61,7 @@ TEST(sys_statvfs, statvfs) {
   Check(sb);
 }
 
-TEST(sys_statvfs, statvfs64) {
+TEST(sys_statvfs, statvfs64_smoke) {
   struct statvfs64 sb;
   ASSERT_EQ(0, statvfs64("/proc", &sb));
   Check(sb);
@@ -57,7 +75,7 @@ TEST(sys_statvfs, fstatvfs) {
   Check(sb);
 }
 
-TEST(sys_statvfs, fstatvfs64) {
+TEST(sys_statvfs, fstatvfs64_smoke) {
   struct statvfs64 sb;
   int fd = open("/proc", O_RDONLY);
   ASSERT_EQ(0, fstatvfs64(fd, &sb));

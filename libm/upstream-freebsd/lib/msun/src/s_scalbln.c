@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2004 David Schultz <das@FreeBSD.ORG>
  * All rights reserved.
  *
@@ -23,9 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/s_scalbln.c 278339 2015-02-07 00:38:18Z kargl $");
 
 #include <math.h>
 

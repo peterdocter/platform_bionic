@@ -1,7 +1,6 @@
 /*	$NetBSD: res_mkquery.c,v 1.6 2006/01/24 17:40:32 christos Exp $	*/
 
 /*
- * Copyright (c) 2008  Android Open Source Project (query id randomization)
  * Copyright (c) 1985, 1993
  *    The Regents of the University of California.  All rights reserved.
  *
@@ -146,6 +145,7 @@ res_nmkquery(res_state statp,
 	hp->id = htons(res_randomid());
 	hp->opcode = op;
 	hp->rd = (statp->options & RES_RECURSE) != 0U;
+	hp->ad = (statp->options & RES_USE_DNSSEC) != 0U;
 	hp->rcode = NOERROR;
 	cp = buf + HFIXEDSZ;
 	ep = buf + buflen;
@@ -254,7 +254,9 @@ res_nopt(res_state statp,
 
 	ns_put16(T_OPT, cp);	/* TYPE */
 	cp += INT16SZ;
-	ns_put16(anslen & 0xffff, cp);	/* CLASS = UDP payload size */
+	if (anslen > 0xffff)
+		anslen = 0xffff;
+	ns_put16(anslen, cp);			/* CLASS = UDP payload size */
 	cp += INT16SZ;
 	*cp++ = NOERROR;	/* extended RCODE */
 	*cp++ = 0;		/* EDNS version */
@@ -267,8 +269,28 @@ res_nopt(res_state statp,
 	}
 	ns_put16(flags, cp);
 	cp += INT16SZ;
+#ifdef EDNS0_PADDING
+	{
+		u_int16_t minlen = (cp - buf) + 3 * INT16SZ;
+		u_int16_t extra = minlen % EDNS0_PADDING;
+		u_int16_t padlen = (EDNS0_PADDING - extra) % EDNS0_PADDING;
+		if (minlen > buflen) {
+			return (-1);
+		}
+		padlen = MIN(padlen, buflen - minlen);
+		ns_put16(padlen + 2 * INT16SZ, cp);	/* RDLEN */
+		cp += INT16SZ;
+		ns_put16(NS_OPT_PADDING, cp);	/* OPTION-CODE */
+		cp += INT16SZ;
+		ns_put16(padlen, cp);	/* OPTION-LENGTH */
+		cp += INT16SZ;
+		memset(cp, 0, padlen);
+		cp += padlen;
+	}
+#else
 	ns_put16(0, cp);	/* RDLEN */
 	cp += INT16SZ;
+#endif
 	hp->arcount = htons(ntohs(hp->arcount) + 1);
 
 	return (cp - buf);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdtoa.c,v 1.2 2009/10/16 12:15:03 martynas Exp $	*/
+/*	$OpenBSD: hdtoa.c,v 1.5 2020/05/31 12:27:19 mortimer Exp $	*/
 /*-
  * Copyright (c) 2004, 2005 David Schultz <das@FreeBSD.ORG>
  * All rights reserved.
@@ -112,7 +112,7 @@ dorounding(char *s0, int ndigits, int sign, int *decpt)
  *
  * Note that the C99 standard does not specify what the leading digit
  * should be for non-zero numbers.  For instance, 0x1.3p3 is the same
- * as 0x2.6p2 is the same as 0x4.cp3.  This implementation chooses the
+ * as 0x2.6p2 is the same as 0x4.cp1.  This implementation chooses the
  * first digit so that subsequent digits are aligned on nibble
  * boundaries (before rounding).
  *
@@ -210,6 +210,7 @@ __hdtoa(double d, const char *xdigs, int ndigits, int *decpt, int *sign,
 
 	return (s0);
 }
+DEF_STRONG(__hdtoa);
 
 #if (LDBL_MANT_DIG > DBL_MANT_DIG)
 
@@ -224,6 +225,7 @@ __hldtoa(long double e, const char *xdigs, int ndigits, int *decpt, int *sign,
 	struct ieee_ext *p = (struct ieee_ext *)&e;
 	char *s, *s0;
 	int bufsize;
+	int fbits = 0;
 
 	*sign = p->ext_sign;
 
@@ -272,23 +274,24 @@ __hldtoa(long double e, const char *xdigs, int ndigits, int *decpt, int *sign,
 	 */
 	for (s = s0 + bufsize - 1; s > s0 + sigfigs - 1; s--)
 		*s = 0;
-	for (; s > s0 + sigfigs - (EXT_FRACLBITS / 4) - 1 && s > s0; s--) {
+
+	for (fbits = EXT_FRACLBITS / 4; fbits > 0 && s > s0; s--, fbits--) {
 		*s = p->ext_fracl & 0xf;
 		p->ext_fracl >>= 4;
 	}
-#ifdef EXT_FRACHMBITS
-	for (; s > s0; s--) {
-		*s = p->ext_frachm & 0xf;
-		p->ext_frachm >>= 4;
-	}
-#endif
 #ifdef EXT_FRACLMBITS
-	for (; s > s0; s--) {
+	for (fbits = EXT_FRACLMBITS / 4; fbits > 0 && s > s0; s--, fbits--) {
 		*s = p->ext_fraclm & 0xf;
 		p->ext_fraclm >>= 4;
 	}
 #endif
-	for (; s > s0; s--) {
+#ifdef EXT_FRACHMBITS
+	for (fbits = EXT_FRACHMBITS / 4; fbits > 0 && s > s0; s--, fbits--) {
+		*s = p->ext_frachm & 0xf;
+		p->ext_frachm >>= 4;
+	}
+#endif
+	for (fbits = EXT_FRACHBITS / 4; fbits > 0 && s > s0; s--, fbits--) {
 		*s = p->ext_frach & 0xf;
 		p->ext_frach >>= 4;
 	}
@@ -299,7 +302,7 @@ __hldtoa(long double e, const char *xdigs, int ndigits, int *decpt, int *sign,
 	 * (partial) nibble, which is dealt with by the next
 	 * statement.  We also tack on the implicit normalization bit.
 	 */
-	*s = p->ext_frach | (1U << ((LDBL_MANT_DIG - 1) % 4));
+	*s = (p->ext_frach | (1U << ((LDBL_MANT_DIG - 1) % 4))) & 0xf;
 
 	/* If ndigits < 0, we are expected to auto-size the precision. */
 	if (ndigits < 0) {
@@ -319,6 +322,7 @@ __hldtoa(long double e, const char *xdigs, int ndigits, int *decpt, int *sign,
 
 	return (s0);
 }
+DEF_STRONG(__hldtoa);
 
 #else	/* (LDBL_MANT_DIG == DBL_MANT_DIG) */
 
@@ -328,5 +332,6 @@ __hldtoa(long double e, const char *xdigs, int ndigits, int *decpt, int *sign,
 {
 	return (__hdtoa((double)e, xdigs, ndigits, decpt, sign, rve));
 }
+DEF_STRONG(__hldtoa);
 
 #endif	/* (LDBL_MANT_DIG == DBL_MANT_DIG) */

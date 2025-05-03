@@ -1,4 +1,4 @@
-/*	$OpenBSD: open_memstream.c,v 1.3 2013/04/03 03:11:53 guenther Exp $	*/
+/*	$OpenBSD: open_memstream.c,v 1.10 2023/07/11 12:14:16 claudio Exp $	*/
 
 /*
  * Copyright (c) 2011 Martin Pieuchot <mpi@openbsd.org>
@@ -16,15 +16,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
-
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "local.h"
+
+#define	MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 struct state {
 	char		 *string;	/* actual stream */
@@ -50,10 +50,9 @@ memstream_write(void *v, const char *b, int l)
 
 		if (sz < end + 1)
 			sz = end + 1;
-		p = realloc(st->string, sz);
+		p = recallocarray(st->string, st->size, sz, 1);
 		if (!p)
 			return (-1);
-		bzero(p + st->size, sz - st->size);
 		*st->pbuf = st->string = p;
 		st->size = sz;
 	}
@@ -76,7 +75,7 @@ static fpos_t
 memstream_seek(void *v, fpos_t off, int whence)
 {
 	struct state	*st = v;
-	ssize_t		 base = 0;
+	size_t		 base = 0;
 
 	switch (whence) {
 	case SEEK_SET:
@@ -89,13 +88,13 @@ memstream_seek(void *v, fpos_t off, int whence)
 		break;
 	}
 
-	if (off > SIZE_MAX - base || off < -base) {
+	if ((off > 0 && off > SIZE_MAX - base) || (off < 0 && base < -off)) {
 		errno = EOVERFLOW;
 		return (-1);
 	}
 
 	st->pos = base + off;
-	*st->psize = MIN(st->pos, st->len);
+	*st->psize = MINIMUM(st->pos, st->len);
 
 	return (st->pos);
 }
@@ -136,7 +135,6 @@ open_memstream(char **pbuf, size_t *psize)
 		return (NULL);
 	}
 
-	*st->string = '\0';
 	st->pos = 0;
 	st->len = 0;
 	st->pbuf = pbuf;
@@ -156,3 +154,4 @@ open_memstream(char **pbuf, size_t *psize)
 
 	return (fp);
 }
+DEF_WEAK(open_memstream);

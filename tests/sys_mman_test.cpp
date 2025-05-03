@@ -14,22 +14,27 @@
  * limitations under the License.
  */
 
-#include <gtest/gtest.h>
-
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/user.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "TemporaryFile.h"
+#include <android-base/file.h>
+#include <gtest/gtest.h>
+
+#include "utils.h"
+
+static const size_t kPageSize = getpagesize();
 
 TEST(sys_mman, mmap_std) {
-  void* map = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  void* map = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   ASSERT_NE(MAP_FAILED, map);
   ASSERT_EQ(0, munmap(map, 4096));
 }
 
 TEST(sys_mman, mmap64_std) {
-  void* map = mmap64(NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  void* map = mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   ASSERT_NE(MAP_FAILED, map);
   ASSERT_EQ(0, munmap(map, 4096));
 }
@@ -37,14 +42,14 @@ TEST(sys_mman, mmap64_std) {
 TEST(sys_mman, mmap_file_bad_offset) {
   TemporaryFile tf;
 
-  void* map = mmap(NULL, 100, PROT_READ, MAP_SHARED, tf.fd, 1);
+  void* map = mmap(nullptr, 100, PROT_READ, MAP_SHARED, tf.fd, 1);
   ASSERT_EQ(MAP_FAILED, map);
 }
 
 TEST(sys_mman, mmap64_file_bad_offset) {
   TemporaryFile tf;
 
-  void* map = mmap64(NULL, 100, PROT_READ, MAP_SHARED, tf.fd, 1);
+  void* map = mmap64(nullptr, 100, PROT_READ, MAP_SHARED, tf.fd, 1);
   ASSERT_EQ(MAP_FAILED, map);
 }
 
@@ -58,7 +63,7 @@ TEST(sys_mman, mmap_file_read) {
 
   ASSERT_EQ(STR_SSIZE(STRING_MSG), write(tf.fd, STRING_MSG, sizeof(STRING_MSG)));
 
-  void* map = mmap(NULL, sizeof(STRING_MSG), PROT_READ, MAP_SHARED, tf.fd, 0);
+  void* map = mmap(nullptr, sizeof(STRING_MSG), PROT_READ, MAP_SHARED, tf.fd, 0);
   ASSERT_NE(MAP_FAILED, map);
 
   char* data = reinterpret_cast<char*>(map);
@@ -73,7 +78,7 @@ TEST(sys_mman, mmap_file_write) {
   ASSERT_EQ(STR_SSIZE(INITIAL_MSG), write(tf.fd, INITIAL_MSG, sizeof(INITIAL_MSG)));
   lseek(tf.fd, 0, SEEK_SET);
 
-  void* map = mmap(NULL, sizeof(STRING_MSG), PROT_WRITE, MAP_SHARED, tf.fd, 0);
+  void* map = mmap(nullptr, sizeof(STRING_MSG), PROT_WRITE, MAP_SHARED, tf.fd, 0);
   ASSERT_NE(MAP_FAILED, map);
   close(tf.fd);
 
@@ -81,7 +86,7 @@ TEST(sys_mman, mmap_file_write) {
 
   ASSERT_EQ(0, munmap(map, sizeof(STRING_MSG)));
 
-  tf.reopen();
+  tf.fd = open(tf.path, O_RDWR);
   char buf[sizeof(STRING_MSG)];
   memset(buf, 0, sizeof(STRING_MSG));
   ASSERT_EQ(STR_SSIZE(STRING_MSG), read(tf.fd, buf, sizeof(STRING_MSG)));
@@ -109,7 +114,7 @@ TEST(sys_mman, mmap_file_read_at_offset) {
 
   ASSERT_NE(-1, lseek(tf.fd, 0, SEEK_SET));
 
-  void* map = mmap(NULL, pagesize, PROT_READ, MAP_SHARED, tf.fd, pagesize);
+  void* map = mmap(nullptr, pagesize, PROT_READ, MAP_SHARED, tf.fd, pagesize);
   ASSERT_NE(MAP_FAILED, map);
 
   char* data = reinterpret_cast<char*>(map);
@@ -117,7 +122,7 @@ TEST(sys_mman, mmap_file_read_at_offset) {
 
   ASSERT_EQ(0, munmap(map, pagesize));
 
-  map = mmap(NULL, pagesize, PROT_READ, MAP_SHARED, tf.fd, 2 * pagesize);
+  map = mmap(nullptr, pagesize, PROT_READ, MAP_SHARED, tf.fd, 2 * pagesize);
   ASSERT_NE(MAP_FAILED, map);
 
   data = reinterpret_cast<char*>(map);
@@ -145,22 +150,22 @@ TEST(sys_mman, mmap_file_write_at_offset) {
 
   ASSERT_NE(-1, lseek(tf.fd, 0, SEEK_SET));
 
-  void* map = mmap(NULL, pagesize, PROT_WRITE, MAP_SHARED, tf.fd, pagesize);
+  void* map = mmap(nullptr, pagesize, PROT_WRITE, MAP_SHARED, tf.fd, pagesize);
   ASSERT_NE(MAP_FAILED, map);
   close(tf.fd);
 
   memcpy(map, NEWPAGE1_MSG, sizeof(NEWPAGE1_MSG));
   ASSERT_EQ(0, munmap(map, pagesize));
 
-  tf.reopen();
-  map = mmap(NULL, pagesize, PROT_WRITE, MAP_SHARED, tf.fd, 2 * pagesize);
+  tf.fd = open(tf.path, O_RDWR);
+  map = mmap(nullptr, pagesize, PROT_WRITE, MAP_SHARED, tf.fd, 2 * pagesize);
   ASSERT_NE(MAP_FAILED, map);
   close(tf.fd);
 
   memcpy(map, NEWPAGE2_MSG, sizeof(NEWPAGE2_MSG));
   ASSERT_EQ(0, munmap(map, pagesize));
 
-  tf.reopen();
+  tf.fd = open(tf.path, O_RDWR);
   char buf[pagesize];
   ASSERT_EQ(static_cast<ssize_t>(pagesize), read(tf.fd, buf, pagesize));
   ASSERT_STREQ(PAGE0_MSG, buf);
@@ -180,7 +185,7 @@ TEST(sys_mman, posix_madvise) {
 
   // Prepare environment.
   ASSERT_EQ(static_cast<ssize_t>(pagesize), write(tempfile.fd, buf, pagesize));
-  void* map = mmap(NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, tempfile.fd, 0);
+  void* map = mmap(nullptr, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, tempfile.fd, 0);
   ASSERT_NE(MAP_FAILED, map);
 
   // Verify different options of posix_madvise.
@@ -198,7 +203,7 @@ TEST(sys_mman, posix_madvise) {
 TEST(sys_mman, posix_madvise_POSIX_MADV_DONTNEED) {
   size_t pagesize = sysconf(_SC_PAGESIZE);
 
-  void* map = mmap(NULL, pagesize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void* map = mmap(nullptr, pagesize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(MAP_FAILED, map);
 
   int* int_ptr = reinterpret_cast<int*>(map);
@@ -214,4 +219,130 @@ TEST(sys_mman, posix_madvise_POSIX_MADV_DONTNEED) {
   }
 
   ASSERT_EQ(0, munmap(map, pagesize));
+}
+
+TEST(sys_mman, mremap) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
+  ASSERT_EQ(MAP_FAILED, mremap(nullptr, 0, 0, 0));
+#pragma clang diagnostic pop
+}
+
+constexpr size_t kHuge = size_t(PTRDIFF_MAX) + 1;
+
+TEST(sys_mman, mmap_PTRDIFF_MAX) {
+  ASSERT_EQ(MAP_FAILED, mmap(nullptr, kHuge, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+}
+
+TEST(sys_mman, mremap_PTRDIFF_MAX) {
+  void* map = mmap(nullptr, kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, map);
+
+  ASSERT_EQ(MAP_FAILED, mremap(map, kPageSize, kHuge, MREMAP_MAYMOVE));
+
+  ASSERT_EQ(0, munmap(map, kPageSize));
+}
+
+TEST(sys_mman, mremap_MREMAP_FIXED) {
+  // We're not trying to test the kernel here; that's external/ltp's job.
+  // We just want to check that optional argument (mremap() is varargs)
+  // gets passed through in an MREMAP_FIXED call.
+  void* vma1 = mmap(NULL, getpagesize(), PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, vma1);
+
+  void* vma2 = mmap(NULL, getpagesize(), PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, vma2);
+
+  void* vma3 = mremap(vma1, getpagesize(), getpagesize(), MREMAP_FIXED | MREMAP_MAYMOVE, vma2);
+  ASSERT_EQ(vma2, vma3);
+}
+
+TEST(sys_mman, mmap_bug_27265969) {
+  char* base = reinterpret_cast<char*>(
+      mmap(nullptr, kPageSize * 2, PROT_EXEC | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+  // Some kernels had bugs that would cause segfaults here...
+  __builtin___clear_cache(base, base + (kPageSize * 2));
+}
+
+TEST(sys_mman, mlock) {
+  void* map = mmap(nullptr, kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, map);
+
+  // Not really anything we can assert about this.
+  mlock(map, kPageSize);
+
+  ASSERT_EQ(0, munmap(map, kPageSize));
+}
+
+TEST(sys_mman, mlock2) {
+#if defined(__GLIBC__)
+  GTEST_SKIP() << "needs glibc 2.27";
+#else
+  void* map = mmap(nullptr, kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, map);
+
+  // Not really anything we can assert about this.
+  mlock2(map, kPageSize, MLOCK_ONFAULT);
+
+  ASSERT_EQ(0, munmap(map, kPageSize));
+#endif
+}
+
+TEST(sys_mman, memfd_create) {
+#if defined(__GLIBC__)
+  GTEST_SKIP() << "needs glibc 2.27";
+#else
+  // Is the MFD_CLOEXEC flag obeyed?
+  errno = 0;
+  int fd = memfd_create("doesn't matter", 0);
+  ASSERT_NE(-1, fd) << strerror(errno);
+
+  int f = fcntl(fd, F_GETFD);
+  ASSERT_NE(-1, f);
+  ASSERT_FALSE(f & FD_CLOEXEC);
+  close(fd);
+
+  errno = 0;
+  fd = memfd_create("doesn't matter", MFD_CLOEXEC);
+  f = fcntl(fd, F_GETFD);
+  ASSERT_NE(-1, f);
+  ASSERT_TRUE(f & FD_CLOEXEC);
+
+  // Can we read and write?
+  std::string expected("hello, world!");
+  ASSERT_TRUE(android::base::WriteStringToFd(expected, fd));
+  ASSERT_EQ(0, lseek(fd, 0, SEEK_SET));
+  std::string actual;
+  ASSERT_TRUE(android::base::ReadFdToString(fd, &actual));
+  ASSERT_EQ(expected, actual);
+
+  close(fd);
+#endif
+}
+
+TEST(sys_mseal, mseal) {
+#if defined(__GLIBC__)
+  GTEST_SKIP() << "needs glibc 2.40";
+#else
+  void* map = mmap(nullptr, kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, map);
+
+#if defined(__LP64__)
+  int rc = mseal(map, kPageSize, 0);
+  if (rc == -1) {
+    ASSERT_ERRNO(ENOSYS);
+    GTEST_SKIP() << "needs kernel with mseal(2)";
+  }
+  ASSERT_EQ(-1, mprotect(map, kPageSize, PROT_READ));
+  ASSERT_ERRNO(EPERM);
+#else
+  // No mseal() for ILP32.
+  errno = 0;
+  ASSERT_EQ(-1, mseal(map, kPageSize, 0));
+  ASSERT_ERRNO(ENOSYS);
+  GTEST_SKIP() << "mseal(2) is LP64-only";
+#endif
+
+  // We can't munmap() our test mapping if mseal() actually succeeded :-)
+#endif
 }

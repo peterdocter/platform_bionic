@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2005 Bruce D. Evans and Steven G. Kargl
  * All rights reserved.
  *
@@ -35,9 +37,6 @@
  * The sign of the result for some exceptional values is unspecified but
  * must satisfy both cosh(conj(z)) == conj(cosh(z)) and cosh(-z) == cosh(z).
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/s_ccosh.c 284423 2015-06-15 20:11:06Z tijl $");
 
 #include <complex.h>
 #include <math.h>
@@ -144,7 +143,8 @@ ccosh(double complex z)
 	 * Optionally raises the invalid floating-point exception for finite
 	 * nonzero y.  Choice = don't raise (except for signaling NaNs).
 	 */
-	return (CMPLX((x * x) * (y - y), (x + x) * (y - y)));
+	return (CMPLX(((long double)x * x) * (y - y),
+	    ((long double)x + x) * (y - y)));
 }
 
 double complex

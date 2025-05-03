@@ -19,17 +19,8 @@
 #include <errno.h>
 #include <gtest/gtest.h>
 
-static void TestBasename(const char* in, const char* expected_out) {
-  char* writable_in = (in != NULL) ? strdup(in) : NULL;
-  errno = 0;
-  const char* out = basename(&writable_in[0]);
-  ASSERT_STREQ(expected_out, out) << in;
-  ASSERT_EQ(0, errno) << in;
-  free(writable_in);
-}
-
 static void TestDirname(const char* in, const char* expected_out) {
-  char* writable_in = (in != NULL) ? strdup(in) : NULL;
+  char* writable_in = (in != nullptr) ? strdup(in) : nullptr;
   errno = 0;
   const char* out = dirname(&writable_in[0]);
   ASSERT_STREQ(expected_out, out) << in;
@@ -37,23 +28,8 @@ static void TestDirname(const char* in, const char* expected_out) {
   free(writable_in);
 }
 
-// Do not use basename as the test name, it's defined to another value in glibc
-// so leads to a differently named test on host versus target architectures.
-TEST(libgen, posix_basename) {
-  TestBasename(NULL, ".");
-  TestBasename("", ".");
-  TestBasename("/usr/lib", "lib");
-  TestBasename("/usr/", "usr");
-  TestBasename("usr", "usr");
-  TestBasename("/", "/");
-  TestBasename(".", ".");
-  TestBasename("..", "..");
-  TestBasename("///", "/");
-  TestBasename("//usr//lib//", "lib");
-}
-
 TEST(libgen, dirname) {
-  TestDirname(NULL, ".");
+  TestDirname(nullptr, ".");
   TestDirname("", ".");
   TestDirname("/usr/lib", "/usr");
   TestDirname("/usr/", "/");
@@ -69,7 +45,7 @@ static void TestBasename(const char* in, const char* expected_out, int expected_
   errno = 0;
   int rc = basename_r(in, buf, buf_size);
   ASSERT_EQ(expected_rc, rc) << in;
-  if (rc != -1 && buf != NULL) {
+  if (rc != -1 && buf != nullptr) {
     ASSERT_STREQ(expected_out, buf) << in;
   }
   ASSERT_EQ(expected_errno, errno) << in;
@@ -80,7 +56,7 @@ static void TestDirname(const char* in, const char* expected_out, int expected_r
   errno = 0;
   int rc = dirname_r(in, buf, buf_size);
   ASSERT_EQ(expected_rc, rc) << in;
-  if (rc != -1 && buf != NULL) {
+  if (rc != -1 && buf != nullptr) {
     ASSERT_STREQ(expected_out, buf) << in;
   }
   ASSERT_EQ(expected_errno, errno) << in;
@@ -90,7 +66,7 @@ static void TestDirname(const char* in, const char* expected_out, int expected_r
 TEST(libgen, basename_r) {
 #if defined(__BIONIC__) && !defined(__LP64__)
   char buf[256];
-  TestBasename("", ".",  1, NULL, 0, 0);
+  TestBasename("", ".",  1, nullptr, 0, 0);
   TestBasename("", ".", -1, buf, 0, ERANGE);
   TestBasename("", ".", -1, buf, 1, ERANGE);
   TestBasename("", ".", 1, buf, 2, 0);
@@ -102,14 +78,14 @@ TEST(libgen, basename_r) {
   TestBasename(".", ".", 1, buf, sizeof(buf), 0);
   TestBasename("..", "..", 2, buf, sizeof(buf), 0);
 #else // __BIONIC__
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
+  GTEST_SKIP() << "basename_r is only available on 32-bit bionic";
 #endif // __BIONIC__
 }
 
 TEST(libgen, dirname_r) {
 #if defined(__BIONIC__) && !defined(__LP64__)
   char buf[256];
-  TestDirname("", ".",  1, NULL, 0, 0);
+  TestDirname("", ".",  1, nullptr, 0, 0);
   TestDirname("", ".", -1, buf, 0, ERANGE);
   TestDirname("", ".", -1, buf, 1, ERANGE);
   TestDirname("", ".", 1, buf, 2, 0);
@@ -119,6 +95,6 @@ TEST(libgen, dirname_r) {
   TestDirname(".", ".", 1, buf, sizeof(buf), 0);
   TestDirname("..", ".", 1, buf, sizeof(buf), 0);
 #else // __BIONIC__
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
+  GTEST_SKIP() << "dirname_r is only available on 32-bit bionic";
 #endif // __BIONIC__
 }

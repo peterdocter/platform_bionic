@@ -1,12 +1,4 @@
-# this module contains all the defaults used by the generation of cleaned-up headers
-# for the Bionic C library
-#
-
-import time, os, sys
-from utils import *
-
-# the list of supported architectures
-kernel_archs = [ 'arm', 'arm64', 'mips', 'x86' ]
+# All the defaults used to generate the cleaned-up uapi headers for bionic.
 
 # the list of include directories that belong to the kernel
 # tree. used when looking for sources...
@@ -26,6 +18,52 @@ kernel_known_macros = {
     "CONFIG_64BIT": "__LP64__",
     "CONFIG_X86_32": "__i386__",
     "__EXPORTED_HEADERS__": "1",
+    "__HAVE_BUILTIN_BSWAP16__": "1",
+    "__HAVE_BUILTIN_BSWAP32__": "1",
+    "__HAVE_BUILTIN_BSWAP64__": "1",
+    # Use this to remove the struct __kernel_old_timeval definition.
+    # Otherwise, there will be two struct timeval definitions when
+    # __kernel_old_timeval is renamed to timeval.
+    "__kernel_old_timeval": "1",
+    # Drop the custom byte swap functions and just use the clang builtins.
+    # https://github.com/android/ndk/issues/2107
+    "__arch_swab16": kCppUndefinedMacro,
+    "__arch_swab16p": kCppUndefinedMacro,
+    "__arch_swab16s": kCppUndefinedMacro,
+    "__arch_swab32": kCppUndefinedMacro,
+    "__arch_swab32p": kCppUndefinedMacro,
+    "__arch_swab32s": kCppUndefinedMacro,
+    "__arch_swab64": kCppUndefinedMacro,
+    "__arch_swab64p": kCppUndefinedMacro,
+    "__arch_swab64s": kCppUndefinedMacro,
+    "__arch_swahb32": kCppUndefinedMacro,
+    "__arch_swahb32p": kCppUndefinedMacro,
+    "__arch_swahb32s": kCppUndefinedMacro,
+    "__arch_swahw32": kCppUndefinedMacro,
+    "__arch_swahw32p": kCppUndefinedMacro,
+    "__arch_swahw32s": kCppUndefinedMacro,
+    }
+
+# This is the set of known kernel data structures we want to remove from
+# the final headers. If the map value is non-empty, that means that in
+# addition to removing the structure, add a #include to the file.
+kernel_structs_to_remove = {
+    # Remove these structures since they are still the same as
+    # timeval, itimerval. Also, add an include of linux/time.h
+    # since __kernel_old_timeval is being changed to timeval, and
+    # is only present in linux/time.h.
+    "__kernel_old_timeval": "linux/time.h",
+    "__kernel_old_itimerval": None,
+    # Replace all of the below structures with #include <bits/STRUCT.h>
+    "__kernel_sockaddr_storage": "bits/sockaddr_storage.h",
+    "epoll_event": "bits/epoll_event.h",
+    "flock": "bits/flock.h",
+    "flock64": "bits/flock64.h",
+    "in_addr": "bits/in_addr.h",
+    "ip_mreq_source": "bits/ip_mreq_source.h",
+    "ip_msfilter": "bits/ip_msfilter.h",
+    "tcphdr": "bits/tcphdr.h",
+    "timespec": "bits/timespec.h",
     }
 
 # define to true if you want to remove all defined(CONFIG_FOO) tests
@@ -33,31 +71,28 @@ kernel_known_macros = {
 # but just generates cleaner results
 kernel_remove_config_macros = True
 
-# maps an architecture to a set of default macros that would be provided by
-# toolchain preprocessor
+# Maps an architecture to a set of default macros that would be provided by
+# the toolchain's preprocessor. Currently only used to remove confusing
+# big-endian junk from the 32-bit arm headers.
 kernel_default_arch_macros = {
     "arm": {"__ARMEB__": kCppUndefinedMacro, "__ARM_EABI__": "1"},
-    "arm64": {},
-    "mips": {"__MIPSEB__": kCppUndefinedMacro,
-             "__MIPSEL__": "1",
-             "CONFIG_32BIT": "_ABIO32",
-             "CONFIG_CPU_LITTLE_ENDIAN": "1",
-             "__SANE_USERSPACE_TYPES__": "1",},
-    "x86": {},
     }
 
-kernel_arch_token_replacements = {
-    "arm": {},
-    "arm64": {},
-    "mips": {"off_t":"__kernel_off_t"},
-    "x86": {},
-    }
-
-# Replace tokens in the output according to this mapping
+# Replace tokens in the output according to this mapping.
 kernel_token_replacements = {
-    "asm": "__asm__",
     # The kernel usage of __unused for unused struct fields conflicts with the macro defined in <sys/cdefs.h>.
     "__unused": "__linux_unused",
+    # The kernel usage of C++ keywords causes problems for C++ code so rename.
+    "class": "__linux_class",
+    "private": "__linux_private",
+    "virtual": "__linux_virtual",
+    # The non-64 stuff is legacy; msqid64_ds/ipc64_perm is what userspace wants.
+    "msqid_ds": "__kernel_legacy_msqid_ds",
+    "semid_ds": "__kernel_legacy_semid_ds",
+    "shmid_ds": "__kernel_legacy_shmid_ds",
+    "ipc_perm": "__kernel_legacy_ipc_perm",
+    # The kernel semun isn't usable (https://github.com/android-ndk/ndk/issues/400).
+    "semun": "__kernel_legacy_semun",
     # The kernel's _NSIG/NSIG are one less than the userspace value, so we need to move them aside.
     "_NSIG": "_KERNEL__NSIG",
     "NSIG": "_KERNEL_NSIG",
@@ -66,83 +101,58 @@ kernel_token_replacements = {
     "SIGRTMAX": "__SIGRTMAX",
     # We want to support both BSD and Linux member names in struct udphdr.
     "udphdr": "__kernel_udphdr",
+    # This causes problems when trying to export the headers for the ndk.
+    "__attribute_const__": "__attribute__((__const__))",
+    # The kernel started using struct __kernel_old_timeval in some places,
+    # which is the exact same as struct timeval. Replace that name with
+    # timeval so that kernel structures all use the same named structure.
+    # If struct __kernel_old_timeval and struct timeval become different,
+    # then a different solution needs to be implemented.
+    "__kernel_old_timeval": "timeval",
+    # Do the same for __kernel_old_itimerval as for timeval.
+    "__kernel_old_itimerval": "itimerval",
+    # Do the same for __kernel_sockaddr_storage.
+    "__kernel_sockaddr_storage": "sockaddr_storage",
+    # Replace __packed with __attribute__((__packed__)) to avoid depending
+    # on sys/cdefs.h
+    "__packed": "__attribute__((__packed__))",
+    # Remove unused macros (http://b/262917450).
+    "__force": "",
+    "__user": "",
+    # Rename the kernel's sigaction so we can expose our POSIX one publicly,
+    # but translate to the kernel's one internally.
+    "sigaction": "__kernel_sigaction",
     }
 
-# this is the set of known static inline functions that we want to keep
-# in the final ARM headers. this is only used to keep optimized byteswapping
-# static functions and stuff like that.
-# TODO: this isn't working!
-kernel_known_arm_statics = set(
-        [ "___arch__swab32",    # asm-arm/byteorder.h
-        ]
-    )
 
-kernel_known_arm64_statics = set(
-        [
-        ]
-    )
-
-kernel_known_mips_statics = set(
-        [
-        ]
-    )
-
-kernel_known_x86_statics = set(
-        [ "___arch__swab32",  # asm-x86/byteorder.h
-          "___arch__swab64",  # asm-x86/byteorder.h
-        ]
-    )
-
+# Static inline functions that we want to keep.
 kernel_known_generic_statics = set(
         [
           "ipt_get_target",  # uapi/linux/netfilter_ipv4/ip_tables.h
           "ip6t_get_target", # uapi/linux/netfilter_ipv6/ip6_tables.h
+          # Byte swapping inlines from uapi/linux/swab.h
+          # The below functions are the ones we are guaranting we export.
+          "__swab16",
+          "__swab32",
+          "__swab64",
+          "__swab16p",
+          "__swab32p",
+          "__swab64p",
+          "__swab16s",
+          "__swab32s",
+          "__swab64s",
+          "__swahw32",
+          "__swahb32",
+          "__swahw32p",
+          "__swahb32p",
+          "__swahw32s",
+          "__swahb32s",
+          # These are required to support the above functions.
+          "__fswahw32",
+          "__fswahb32",
+          # This is used by various macros in <linux/ioprio.h>.
+          "ioprio_value",
+
+          # Contact opensource-licensing@ before adding to this set.
         ]
     )
-
-# this maps an architecture to the set of static inline functions that
-# we want to keep in the final headers
-#
-kernel_known_statics = {
-        "arm" : kernel_known_arm_statics,
-        "arm64" : kernel_known_arm64_statics,
-        "mips" : kernel_known_mips_statics,
-        "x86" : kernel_known_x86_statics,
-    }
-
-# this is a list of macros which we want to specifically exclude from
-# the generated files.
-#
-kernel_ignored_macros = set(
-        [
-
-        ]
-    )
-
-# this is the standard disclaimer
-#
-kernel_disclaimer = """\
-/****************************************************************************
- ****************************************************************************
- ***
- ***   This header was automatically generated from a Linux kernel header
- ***   of the same name, to make information necessary for userspace to
- ***   call into the kernel available to libc.  It contains only constants,
- ***   structures, and macros generated from the original header, and thus,
- ***   contains no copyrightable information.
- ***
- ***   To edit the content of this header, modify the corresponding
- ***   source file (e.g. under external/kernel-headers/original/) then
- ***   run bionic/libc/kernel/tools/update_all.py
- ***
- ***   Any manual change here will be lost the next time this script will
- ***   be run. You've been warned!
- ***
- ****************************************************************************
- ****************************************************************************/
-"""
-
-# This is the warning line that will be inserted every N-th line in the output
-kernel_warning = """\
-/* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
-"""

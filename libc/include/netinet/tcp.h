@@ -29,9 +29,19 @@
 #ifndef _NETINET_TCP_H
 #define _NETINET_TCP_H
 
+#include <sys/cdefs.h>
+#include <stdint.h>
+
 #include <linux/tcp.h>
 
 __BEGIN_DECLS
+
+#define TH_FIN 0x01
+#define TH_SYN 0x02
+#define TH_RST 0x04
+#define TH_PUSH 0x08
+#define TH_ACK 0x10
+#define TH_URG 0x20
 
 enum {
   TCP_ESTABLISHED = 1,

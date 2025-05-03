@@ -35,41 +35,17 @@
 #ifndef	_FTS_H_
 #define	_FTS_H_
 
+#include <sys/cdefs.h>
 #include <sys/types.h>
 
-typedef struct {
-	struct _ftsent *fts_cur;	/* current node */
-	struct _ftsent *fts_child;	/* linked list of children */
-	struct _ftsent **fts_array;	/* sort array */
-	dev_t fts_dev;			/* starting device # */
-	char *fts_path;			/* path for this descent */
-	int fts_rfd;			/* fd for root */
-	size_t fts_pathlen;		/* sizeof(path) */
-	int fts_nitems;			/* elements in the sort array */
-	int (*fts_compar)();		/* compare function */
-
-#define	FTS_COMFOLLOW	0x0001		/* follow command line symlinks */
-#define	FTS_LOGICAL	0x0002		/* logical walk */
-#define	FTS_NOCHDIR	0x0004		/* don't change directories */
-#define	FTS_NOSTAT	0x0008		/* don't get stat info */
-#define	FTS_PHYSICAL	0x0010		/* physical walk */
-#define	FTS_SEEDOT	0x0020		/* return dot and dot-dot */
-#define	FTS_XDEV	0x0040		/* don't cross devices */
-#define	FTS_OPTIONMASK	0x00ff		/* valid user option mask */
-
-#define	FTS_NAMEONLY	0x1000		/* (private) child names only */
-#define	FTS_STOP	0x2000		/* (private) unrecoverable error */
-	int fts_options;		/* fts_open options, global flags */
-} FTS;
-
 typedef struct _ftsent {
-	struct _ftsent *fts_cycle;	/* cycle node */
-	struct _ftsent *fts_parent;	/* parent directory */
-	struct _ftsent *fts_link;	/* next file in directory */
+	struct _ftsent * _Nullable fts_cycle;	/* cycle node */
+	struct _ftsent * _Nullable fts_parent;	/* parent directory */
+	struct _ftsent * _Nullable fts_link;	/* next file in directory */
 	long fts_number;	        /* local numeric value */
-	void *fts_pointer;	        /* local address value */
-	char *fts_accpath;		/* access path */
-	char *fts_path;			/* root path */
+	void * _Nullable fts_pointer;	        /* local address value */
+	char * _Nullable fts_accpath;		/* access path */
+	char * _Nullable fts_path;			/* root path */
 	int fts_errno;			/* errno for this node */
 	int fts_symfd;			/* fd for symlink */
 	size_t fts_pathlen;		/* strlen(fts_path) */
@@ -109,17 +85,44 @@ typedef struct _ftsent {
 #define	FTS_SKIP	 4		/* discard node */
 	unsigned short fts_instr;	/* fts_set() instructions */
 
-	struct stat *fts_statp;		/* stat(2) information */
+	struct stat * _Nullable fts_statp;		/* stat(2) information */
 	char fts_name[1];		/* file name */
 } FTSENT;
 
+typedef struct {
+	struct _ftsent * _Nullable fts_cur;	/* current node */
+	struct _ftsent * _Nullable fts_child;	/* linked list of children */
+	struct _ftsent * _Nullable * _Nullable fts_array;	/* sort array */
+	dev_t fts_dev;			/* starting device # */
+	char * _Nullable fts_path;			/* path for this descent */
+	int fts_rfd;			/* fd for root */
+	size_t fts_pathlen;		/* sizeof(path) */
+	int fts_nitems;			/* elements in the sort array */
+	int (* _Nullable fts_compar)(const FTSENT* _Nonnull * _Nonnull, const FTSENT* _Nonnull * _Nonnull);		/* compare function */
+
+#define	FTS_COMFOLLOW	0x0001		/* follow command line symlinks */
+#define	FTS_LOGICAL	0x0002		/* logical walk */
+#define	FTS_NOCHDIR	0x0004		/* don't change directories */
+#define	FTS_NOSTAT	0x0008		/* don't get stat info */
+#define	FTS_PHYSICAL	0x0010		/* physical walk */
+#define	FTS_SEEDOT	0x0020		/* return dot and dot-dot */
+#define	FTS_XDEV	0x0040		/* don't cross devices */
+#define	FTS_OPTIONMASK	0x00ff		/* valid user option mask */
+
+#define FTS_NAMEONLY 0x1000  /* (private) child names only */
+#define FTS_STOP 0x2000      /* (private) unrecoverable error */
+#define FTS_FOR_FTW 0x4000   /* (private) fts is being called by ftw/nftw */
+	int fts_options;		/* fts_open options, global flags */
+} FTS;
+
 __BEGIN_DECLS
-FTSENT	*fts_children(FTS *, int);
-int	 fts_close(FTS *);
-FTS	*fts_open(char * const *, int,
-	    int (*)(const FTSENT **, const FTSENT **));
-FTSENT	*fts_read(FTS *);
-int	 fts_set(FTS *, FTSENT *, int);
+
+FTSENT* _Nullable fts_children(FTS* _Nonnull __fts, int __options);
+int fts_close(FTS* _Nonnull __fts);
+FTS* _Nullable fts_open(char* _Nullable const* _Nonnull __path, int __options, int (* _Nullable __comparator)(const FTSENT* _Nonnull * _Nonnull  __lhs, const FTSENT* _Nonnull * _Nonnull __rhs));
+FTSENT* _Nullable fts_read(FTS* _Nonnull __fts);
+int fts_set(FTS* _Nonnull __fts, FTSENT* _Nonnull __entry, int __options);
+
 __END_DECLS
 
 #endif /* !_FTS_H_ */

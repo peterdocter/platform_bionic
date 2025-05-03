@@ -14,64 +14,110 @@
  * limitations under the License.
  */
 
+#include "private/bionic_globals.h"
+#include "private/bionic_vdso.h"
+
+#include <limits.h>
 #include <link.h>
 #include <string.h>
 #include <sys/auxv.h>
+#include <sys/cdefs.h>
+#include <sys/hwprobe.h>
+#include <sys/time.h>
+#include <syscall.h>
+#include <time.h>
 #include <unistd.h>
 
-#if defined(__aarch64__) || defined(__x86_64__) || defined (__i386__)
+extern "C" int __clock_gettime(int, struct timespec*);
+extern "C" int __clock_getres(int, struct timespec*);
+extern "C" int __gettimeofday(struct timeval*, struct timezone*);
 
-#if defined(__aarch64__)
-#define VDSO_CLOCK_GETTIME_SYMBOL "__kernel_clock_gettime"
-#define VDSO_GETTIMEOFDAY_SYMBOL  "__kernel_gettimeofday"
-#elif defined(__x86_64__) || defined(__i386__)
-#define VDSO_CLOCK_GETTIME_SYMBOL "__vdso_clock_gettime"
-#define VDSO_GETTIMEOFDAY_SYMBOL  "__vdso_gettimeofday"
-#endif
+static inline int vdso_return(int result) {
+  if (__predict_true(result == 0)) return 0;
 
-#include <errno.h>
-#include <limits.h>
-#include <sys/mman.h>
-#include <time.h>
-
-#include "private/bionic_prctl.h"
-#include "private/libc_logging.h"
-
-extern "C" int __clock_gettime(int, timespec*);
-extern "C" int __gettimeofday(timeval*, struct timezone*);
-
-struct vdso_entry {
-  const char* name;
-  void* fn;
-};
-
-enum {
-  VDSO_CLOCK_GETTIME = 0,
-  VDSO_GETTIMEOFDAY,
-  VDSO_END
-};
-
-static union {
-  vdso_entry entries[VDSO_END];
-  char padding[PAGE_SIZE];
-} vdso __attribute__((aligned(PAGE_SIZE))) = {{
-  [VDSO_CLOCK_GETTIME] = { VDSO_CLOCK_GETTIME_SYMBOL, reinterpret_cast<void*>(__clock_gettime) },
-  [VDSO_GETTIMEOFDAY] = { VDSO_GETTIMEOFDAY_SYMBOL, reinterpret_cast<void*>(__gettimeofday) },
-}};
+  errno = -result;
+  return -1;
+}
 
 int clock_gettime(int clock_id, timespec* tp) {
-  int (*vdso_clock_gettime)(int, timespec*) =
-      reinterpret_cast<int (*)(int, timespec*)>(vdso.entries[VDSO_CLOCK_GETTIME].fn);
-  return vdso_clock_gettime(clock_id, tp);
+  auto vdso_clock_gettime = reinterpret_cast<decltype(&clock_gettime)>(
+    __libc_globals->vdso[VDSO_CLOCK_GETTIME].fn);
+  if (__predict_true(vdso_clock_gettime)) {
+    return vdso_return(vdso_clock_gettime(clock_id, tp));
+  }
+  return __clock_gettime(clock_id, tp);
+}
+
+int clock_getres(int clock_id, timespec* tp) {
+  auto vdso_clock_getres = reinterpret_cast<decltype(&clock_getres)>(
+    __libc_globals->vdso[VDSO_CLOCK_GETRES].fn);
+  if (__predict_true(vdso_clock_getres)) {
+    return vdso_return(vdso_clock_getres(clock_id, tp));
+  }
+  return __clock_getres(clock_id, tp);
 }
 
 int gettimeofday(timeval* tv, struct timezone* tz) {
-  int (*vdso_gettimeofday)(timeval*, struct timezone*) =
-      reinterpret_cast<int (*)(timeval*, struct timezone*)>(vdso.entries[VDSO_GETTIMEOFDAY].fn);
-  return vdso_gettimeofday(tv, tz);
+  auto vdso_gettimeofday = reinterpret_cast<decltype(&gettimeofday)>(
+    __libc_globals->vdso[VDSO_GETTIMEOFDAY].fn);
+  if (__predict_true(vdso_gettimeofday)) {
+    return vdso_return(vdso_gettimeofday(tv, tz));
+  }
+  return __gettimeofday(tv, tz);
 }
 
-static void __libc_init_vdso_entries() {
+time_t time(time_t* t) {
+  // Only x86/x86-64 actually have time() in the vdso.
+#if defined(VDSO_TIME_SYMBOL)
+  auto vdso_time = reinterpret_cast<decltype(&time)>(__libc_globals->vdso[VDSO_TIME].fn);
+  if (__predict_true(vdso_time)) {
+    return vdso_time(t);
+  }
+#endif
+
+  // We can't fallback to the time(2) system call because it doesn't exist for most architectures.
+  timeval tv;
+  if (gettimeofday(&tv, nullptr) == -1) return -1;
+  if (t) *t = tv.tv_sec;
+  return tv.tv_sec;
+}
+
+#if defined(__riscv)
+int __riscv_hwprobe(struct riscv_hwprobe* _Nonnull pairs, size_t pair_count, size_t cpu_count,
+                    unsigned long* _Nullable cpus, unsigned flags) {
+  auto vdso_riscv_hwprobe =
+      reinterpret_cast<decltype(&__riscv_hwprobe)>(__libc_globals->vdso[VDSO_RISCV_HWPROBE].fn);
+  if (__predict_true(vdso_riscv_hwprobe)) {
+    return -vdso_riscv_hwprobe(pairs, pair_count, cpu_count, cpus, flags);
+  }
+  // Inline the syscall directly in case someone's calling it from an
+  // ifunc resolver where we won't be able to set errno on failure.
+  // (Rather than our usual trick of letting the python-generated
+  // wrapper set errno but saving/restoring errno in cases where the API
+  // is to return an error value rather than setting errno.)
+  register long a0 __asm__("a0") = reinterpret_cast<long>(pairs);
+  register long a1 __asm__("a1") = pair_count;
+  register long a2 __asm__("a2") = cpu_count;
+  register long a3 __asm__("a3") = reinterpret_cast<long>(cpus);
+  register long a4 __asm__("a4") = flags;
+  register long a7 __asm__("a7") = __NR_riscv_hwprobe;
+  __asm__ volatile("ecall" : "=r"(a0) : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a7));
+  return -a0;
+}
+#endif
+
+void __libc_init_vdso(libc_globals* globals) {
+  auto&& vdso = globals->vdso;
+  vdso[VDSO_CLOCK_GETTIME] = {VDSO_CLOCK_GETTIME_SYMBOL, nullptr};
+  vdso[VDSO_CLOCK_GETRES] = {VDSO_CLOCK_GETRES_SYMBOL, nullptr};
+  vdso[VDSO_GETTIMEOFDAY] = {VDSO_GETTIMEOFDAY_SYMBOL, nullptr};
+#if defined(VDSO_TIME_SYMBOL)
+  vdso[VDSO_TIME] = {VDSO_TIME_SYMBOL, nullptr};
+#endif
+#if defined(VDSO_RISCV_HWPROBE_SYMBOL)
+  vdso[VDSO_RISCV_HWPROBE] = {VDSO_RISCV_HWPROBE_SYMBOL, nullptr};
+#endif
+
   // Do we have a vdso?
   uintptr_t vdso_ehdr_addr = getauxval(AT_SYSINFO_EHDR);
   ElfW(Ehdr)* vdso_ehdr = reinterpret_cast<ElfW(Ehdr)*>(vdso_ehdr_addr);
@@ -85,6 +131,7 @@ static void __libc_init_vdso_entries() {
   for (size_t i = 0; i < vdso_ehdr->e_shnum; ++i) {
     if (vdso_shdr[i].sh_type == SHT_DYNSYM) {
       symbol_count = vdso_shdr[i].sh_size / sizeof(ElfW(Sym));
+      break;
     }
   }
   if (symbol_count == 0) {
@@ -101,6 +148,7 @@ static void __libc_init_vdso_entries() {
     } else if (vdso_phdr[i].p_type == PT_LOAD) {
       vdso_addr = vdso_ehdr_addr + vdso_phdr[i].p_offset - vdso_phdr[i].p_vaddr;
     }
+    if (vdso_addr && vdso_dyn) break;
   }
   if (vdso_addr == 0 || vdso_dyn == nullptr) {
     return;
@@ -115,35 +163,19 @@ static void __libc_init_vdso_entries() {
     } else if (d->d_tag == DT_SYMTAB) {
       symtab = reinterpret_cast<ElfW(Sym)*>(vdso_addr + d->d_un.d_ptr);
     }
+    if (strtab && symtab) break;
   }
   if (strtab == nullptr || symtab == nullptr) {
     return;
   }
 
   // Are there any symbols we want?
-  for (size_t i = 0; i < symbol_count; ++i) {
-    for (size_t j = 0; j < VDSO_END; ++j) {
-      if (strcmp(vdso.entries[j].name, strtab + symtab[i].st_name) == 0) {
-        vdso.entries[j].fn = reinterpret_cast<void*>(vdso_addr + symtab[i].st_value);
+  for (size_t i = 0; i < VDSO_END; ++i) {
+    for (size_t j = 0; j < symbol_count; ++j) {
+      if (strcmp(vdso[i].name, strtab + symtab[j].st_name) == 0) {
+        vdso[i].fn = reinterpret_cast<void*>(vdso_addr + symtab[j].st_value);
+        break;
       }
     }
   }
 }
-
-void __libc_init_vdso() {
-  __libc_init_vdso_entries();
-
-  // We can't use PR_SET_VMA because this isn't an anonymous region.
-  // Long-term we should be able to replace all of this with ifuncs.
-  static_assert(PAGE_SIZE == sizeof(vdso), "sizeof(vdso) too large");
-  if (mprotect(vdso.entries, sizeof(vdso), PROT_READ) == -1) {
-    __libc_fatal("failed to mprotect PROT_READ vdso function pointer table: %s", strerror(errno));
-  }
-}
-
-#else
-
-void __libc_init_vdso() {
-}
-
-#endif

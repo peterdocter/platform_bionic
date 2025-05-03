@@ -33,338 +33,296 @@
 #include <stddef.h>
 #include <xlocale.h>
 
+#include <bits/strcasecmp.h>
+
 __BEGIN_DECLS
 
-#if defined(__USE_BSD)
+#if defined(__USE_BSD) || defined(__USE_GNU)
 #include <strings.h>
 #endif
 
-extern void*  memccpy(void* __restrict, const void* __restrict, int, size_t);
-extern void*  memchr(const void *, int, size_t) __purefunc;
-extern void*  memrchr(const void *, int, size_t) __purefunc;
-extern int    memcmp(const void *, const void *, size_t) __purefunc;
-extern void*  memcpy(void* __restrict, const void* __restrict, size_t);
-#if defined(__USE_GNU)
-extern void*  mempcpy(void* __restrict, const void* __restrict, size_t);
+void* _Nullable memccpy(void* _Nonnull __dst, const void* _Nonnull __src, int __stop_char, size_t __n);
+void* _Nullable memchr(const void* _Nonnull __s, int __ch, size_t __n) __attribute_pure__;
+#if defined(__cplusplus)
+extern "C++" void* _Nullable memrchr(void* _Nonnull __s, int __ch, size_t __n) __RENAME(memrchr) __attribute_pure__;
+extern "C++" const void* _Nullable memrchr(const void* _Nonnull __s, int __ch, size_t __n) __RENAME(memrchr) __attribute_pure__;
+#else
+void* _Nullable memrchr(const void* _Nonnull __s, int __ch, size_t __n) __attribute_pure__;
 #endif
-extern void*  memmove(void *, const void *, size_t);
-extern void*  memset(void *, int, size_t);
-extern void*  memmem(const void *, size_t, const void *, size_t) __purefunc;
+int memcmp(const void* _Nonnull __lhs, const void* _Nonnull __rhs, size_t __n) __attribute_pure__;
+void* _Nonnull memcpy(void* _Nonnull, const void* _Nonnull, size_t);
+#if defined(__USE_GNU)
 
-extern char*  strchr(const char *, int) __purefunc;
-extern char* __strchr_chk(const char *, int, size_t);
+#if __BIONIC_AVAILABILITY_GUARD(23)
+void* _Nonnull mempcpy(void* _Nonnull __dst, const void* _Nonnull __src, size_t __n) __INTRODUCED_IN(23);
+#endif /* __BIONIC_AVAILABILITY_GUARD(23) */
+
+#endif
+void* _Nonnull memmove(void* _Nonnull __dst, const void* _Nonnull __src, size_t __n);
+
+/**
+ * [memset(3)](https://man7.org/linux/man-pages/man3/memset.3.html) writes the
+ * bottom 8 bits of the given int to the next `n` bytes of `dst`.
+ *
+ * Returns `dst`.
+ */
+void* _Nonnull memset(void* _Nonnull __dst, int __ch, size_t __n);
+
+/**
+ * [memset_explicit(3)](https://man7.org/linux/man-pages/man3/memset_explicit.3.html)
+ * writes the bottom 8 bits of the given int to the next `n` bytes of `dst`,
+ * but won't be optimized out by the compiler.
+ *
+ * Returns `dst`.
+ */
+
+#if __BIONIC_AVAILABILITY_GUARD(34)
+void* _Nonnull memset_explicit(void* _Nonnull __dst, int __ch, size_t __n) __INTRODUCED_IN(34);
+#endif /* __BIONIC_AVAILABILITY_GUARD(34) */
+
+
+void* _Nullable memmem(const void* _Nonnull __haystack, size_t __haystack_size, const void* _Nonnull __needle, size_t __needle_size) __attribute_pure__;
+
+char* _Nullable strchr(const char* _Nonnull __s, int __ch) __attribute_pure__;
+char* _Nullable __strchr_chk(const char* _Nonnull __s, int __ch, size_t __n);
 #if defined(__USE_GNU)
 #if defined(__cplusplus)
-extern "C++" char* strchrnul(char*, int) __RENAME(strchrnul) __purefunc;
-extern "C++" const char* strchrnul(const char*, int) __RENAME(strchrnul) __purefunc;
+
+#if __BIONIC_AVAILABILITY_GUARD(24)
+extern "C++" char* _Nonnull strchrnul(char* _Nonnull __s, int __ch) __RENAME(strchrnul) __attribute_pure__ __INTRODUCED_IN(24);
+extern "C++" const char* _Nonnull strchrnul(const char* _Nonnull __s, int __ch) __RENAME(strchrnul) __attribute_pure__ __INTRODUCED_IN(24);
+#endif /* __BIONIC_AVAILABILITY_GUARD(24) */
+
 #else
-char* strchrnul(const char*, int) __purefunc;
+
+#if __BIONIC_AVAILABILITY_GUARD(24)
+char* _Nonnull strchrnul(const char* _Nonnull __s, int __ch) __attribute_pure__ __INTRODUCED_IN(24);
+#endif /* __BIONIC_AVAILABILITY_GUARD(24) */
+
 #endif
 #endif
 
-extern char*  strrchr(const char *, int) __purefunc;
-extern char* __strrchr_chk(const char *, int, size_t);
+char* _Nullable strrchr(const char* _Nonnull __s, int __ch) __attribute_pure__;
+char* _Nullable __strrchr_chk(const char* _Nonnull __s, int __ch, size_t __n);
 
-extern size_t strlen(const char *) __purefunc;
-extern size_t __strlen_chk(const char *, size_t);
-extern int    strcmp(const char *, const char *) __purefunc;
-extern char*  stpcpy(char* __restrict, const char* __restrict);
-extern char*  strcpy(char* __restrict, const char* __restrict);
-extern char*  strcat(char* __restrict, const char* __restrict);
+size_t strlen(const char* _Nonnull __s) __attribute_pure__;
+size_t __strlen_chk(const char* _Nonnull __s, size_t __n);
 
-int strcasecmp(const char*, const char*) __purefunc;
-int strcasecmp_l(const char*, const char*, locale_t) __purefunc;
-int strncasecmp(const char*, const char*, size_t) __purefunc;
-int strncasecmp_l(const char*, const char*, size_t, locale_t) __purefunc;
+int strcmp(const char* _Nonnull __lhs, const char* _Nonnull __rhs) __attribute_pure__;
+char* _Nonnull stpcpy(char* _Nonnull __dst, const char* _Nonnull __src);
+char* _Nonnull strcpy(char* _Nonnull __dst, const char* _Nonnull __src);
+char* _Nonnull strcat(char* _Nonnull __dst, const char* _Nonnull __src);
+char* _Nullable strdup(const char* _Nonnull __s);
 
-extern char*  strdup(const char *);
+char* _Nullable strstr(const char* _Nonnull __haystack, const char* _Nonnull __needle) __attribute_pure__;
+#if defined(__cplusplus)
+extern "C++" char* _Nullable strcasestr(char* _Nonnull, const char* _Nonnull) __RENAME(strcasestr) __attribute_pure__;
+extern "C++" const char* _Nullable strcasestr(const char* _Nonnull, const char* _Nonnull) __RENAME(strcasestr) __attribute_pure__;
+#else
+char* _Nullable strcasestr(const char* _Nonnull __haystack, const char* _Nonnull __needle) __attribute_pure__;
+#endif
+char* _Nullable strtok(char* _Nullable __s, const char* _Nonnull __delimiter);
+char* _Nullable strtok_r(char* _Nullable __s, const char* _Nonnull __delimiter, char* _Nonnull * _Nonnull __pos_ptr);
 
-extern char*  strstr(const char *, const char *) __purefunc;
-extern char*  strcasestr(const char *haystack, const char *needle) __purefunc;
-extern char*  strtok(char* __restrict, const char* __restrict);
-extern char*  strtok_r(char* __restrict, const char* __restrict, char** __restrict);
+/**
+ * [strerror(3)](https://man7.org/linux/man-pages/man3/strerror.3.html)
+ * returns a string describing the given errno value.
+ * `strerror(EINVAL)` would return "Invalid argument", for example.
+ *
+ * On Android, unknown errno values return a string such as "Unknown error 666".
+ * These unknown errno value strings live in thread-local storage, and are valid
+ * until the next call of strerror() on the same thread.
+ *
+ * Returns a pointer to a string.
+ */
+char* _Nonnull strerror(int __errno_value);
 
-extern char* strerror(int);
-extern char* strerror_l(int, locale_t);
-#if defined(__USE_GNU)
-extern char* strerror_r(int, char*, size_t) __RENAME(__gnu_strerror_r);
+/**
+ * Equivalent to strerror() on Android where only C/POSIX locales are available.
+ */
+char* _Nonnull strerror_l(int __errno_value, locale_t _Nonnull __l) __RENAME(strerror);
+
+/**
+ * [strerror_r(3)](https://man7.org/linux/man-pages/man3/strerror_r.3.html)
+ * writes a string describing the given errno value into the given buffer.
+ *
+ * There are two variants of this function, POSIX and GNU.
+ * The GNU variant returns a pointer to the buffer.
+ * The POSIX variant returns 0 on success or an errno value on failure.
+ *
+ * The GNU variant is available since API level 23 if `_GNU_SOURCE` is defined.
+ * The POSIX variant is available otherwise.
+ */
+#if defined(__USE_GNU) && __ANDROID_API__ >= 23
+char* _Nonnull strerror_r(int __errno_value, char* _Nullable __buf, size_t __n) __RENAME(__gnu_strerror_r) __INTRODUCED_IN(23);
 #else /* POSIX */
-extern int strerror_r(int, char*, size_t);
+int strerror_r(int __errno_value, char* _Nonnull __buf, size_t __n);
 #endif
 
-extern size_t strnlen(const char *, size_t) __purefunc;
-extern char*  strncat(char* __restrict, const char* __restrict, size_t);
-extern char*  strndup(const char *, size_t);
-extern int    strncmp(const char *, const char *, size_t) __purefunc;
-extern char*  stpncpy(char* __restrict, const char* __restrict, size_t);
-extern char*  strncpy(char* __restrict, const char* __restrict, size_t);
+/**
+ * [strerrorname_np(3)](https://man7.org/linux/man-pages/man3/strerrorname_np.3.html)
+ * returns the name of the errno constant corresponding to its argument.
+ * `strerrorname_np(38)` would return "ENOSYS", because `ENOSYS` is errno 38. This
+ * is mostly useful for error reporting in cases where a string like "ENOSYS" is
+ * more readable than a string like "Function not implemented", which would be
+ * returned by strerror().
+ *
+ * Returns a pointer to a string, or null for unknown errno values.
+ *
+ * Available since API level 35.
+ */
+#if defined(__USE_GNU)
 
-extern size_t strlcat(char* __restrict, const char* __restrict, size_t);
-extern size_t strlcpy(char* __restrict, const char* __restrict, size_t);
+#if __BIONIC_AVAILABILITY_GUARD(35)
+const char* _Nullable strerrorname_np(int __errno_value) __INTRODUCED_IN(35);
+#endif /* __BIONIC_AVAILABILITY_GUARD(35) */
 
-extern size_t strcspn(const char *, const char *) __purefunc;
-extern char*  strpbrk(const char *, const char *) __purefunc;
-extern char*  strsep(char** __restrict, const char* __restrict);
-extern size_t strspn(const char *, const char *);
+#endif
 
-extern char*  strsignal(int  sig);
+/**
+ * [strerrordesc_np(3)](https://man7.org/linux/man-pages/man3/strerrordesc_np.3.html)
+ * is like strerror() but without localization. Since Android's strerror()
+ * does not localize, this is the same as strerror() on Android.
+ *
+ * Returns a pointer to a string.
+ */
+#if defined(__USE_GNU)
+const char* _Nonnull strerrordesc_np(int __errno_value) __RENAME(strerror);
+#endif
 
-extern int    strcoll(const char *, const char *) __purefunc;
-extern size_t strxfrm(char* __restrict, const char* __restrict, size_t);
+size_t strnlen(const char* _Nonnull __s, size_t __n) __attribute_pure__;
+char* _Nonnull strncat(char* _Nonnull __dst, const char* _Nonnull __src, size_t __n);
+char* _Nullable strndup(const char* _Nonnull __s, size_t __n);
+int strncmp(const char* _Nonnull __lhs, const char* _Nonnull __rhs, size_t __n) __attribute_pure__;
+char* _Nonnull stpncpy(char* _Nonnull __dst, const char* _Nonnull __src, size_t __n);
+char* _Nonnull strncpy(char* _Nonnull __dst, const char* _Nonnull __src, size_t __n);
 
-extern int    strcoll_l(const char *, const char *, locale_t) __purefunc;
-extern size_t strxfrm_l(char* __restrict, const char* __restrict, size_t, locale_t);
+size_t strlcat(char* _Nonnull __dst, const char* _Nonnull __src, size_t __n);
+size_t strlcpy(char* _Nonnull __dst, const char* _Nonnull __src, size_t __n);
 
-#if defined(__USE_GNU) && !defined(__bionic_using_posix_basename)
+size_t strcspn(const char* _Nonnull __s, const char* _Nonnull __reject) __attribute_pure__;
+char* _Nullable strpbrk(const char* _Nonnull __s, const char* _Nonnull __accept) __attribute_pure__;
+char* _Nullable strsep(char* _Nullable * _Nonnull __s_ptr, const char* _Nonnull __delimiter);
+size_t strspn(const char* _Nonnull __s, const char* _Nonnull __accept);
+
+char* _Nonnull strsignal(int __signal);
+
+int strcoll(const char* _Nonnull __lhs, const char* _Nonnull __rhs) __attribute_pure__;
+size_t strxfrm(char* __BIONIC_COMPLICATED_NULLNESS __dst, const char* _Nonnull __src, size_t __n);
+
+int strcoll_l(const char* _Nonnull __lhs, const char* _Nonnull __rhs, locale_t _Nonnull __l) __attribute_pure__;
+size_t strxfrm_l(char* __BIONIC_COMPLICATED_NULLNESS __dst, const char* _Nonnull __src, size_t __n, locale_t _Nonnull __l);
+
+#if defined(__USE_GNU) && !defined(basename)
 /*
  * glibc has a basename in <string.h> that's different to the POSIX one in <libgen.h>.
  * It doesn't modify its argument, and in C++ it's const-correct.
  */
 #if defined(__cplusplus)
-extern "C++" char* basename(char*) __RENAME(__gnu_basename) __nonnull((1));
-extern "C++" const char* basename(const char*) __RENAME(__gnu_basename) __nonnull((1));
+
+#if __BIONIC_AVAILABILITY_GUARD(23)
+extern "C++" char* _Nonnull basename(char* _Nullable __path) __RENAME(__gnu_basename) __INTRODUCED_IN(23);
+extern "C++" const char* _Nonnull basename(const char* _Nonnull __path) __RENAME(__gnu_basename) __INTRODUCED_IN(23);
+#endif /* __BIONIC_AVAILABILITY_GUARD(23) */
+
 #else
-extern char* basename(const char*) __RENAME(__gnu_basename) __nonnull((1));
+
+#if __BIONIC_AVAILABILITY_GUARD(23)
+char* _Nonnull basename(const char* _Nonnull __path) __RENAME(__gnu_basename) __INTRODUCED_IN(23);
+#endif /* __BIONIC_AVAILABILITY_GUARD(23) */
+
 #endif
-#define __bionic_using_gnu_basename
-#endif
-
-extern void* __memchr_chk(const void*, int, size_t, size_t);
-__errordecl(__memchr_buf_size_error, "memchr called with size bigger than buffer");
-
-extern void* __memrchr_chk(const void*, int, size_t, size_t);
-__errordecl(__memrchr_buf_size_error, "memrchr called with size bigger than buffer");
-extern void* __memrchr_real(const void*, int, size_t) __RENAME(memrchr);
-
-extern char* __stpncpy_chk2(char* __restrict, const char* __restrict, size_t, size_t, size_t);
-extern char* __strncpy_chk2(char* __restrict, const char* __restrict, size_t, size_t, size_t);
-extern size_t __strlcpy_real(char* __restrict, const char* __restrict, size_t) __RENAME(strlcpy);
-extern size_t __strlcpy_chk(char *, const char *, size_t, size_t);
-extern size_t __strlcat_real(char* __restrict, const char* __restrict, size_t) __RENAME(strlcat);
-extern size_t __strlcat_chk(char* __restrict, const char* __restrict, size_t, size_t);
-
-#if defined(__BIONIC_FORTIFY)
-
-__BIONIC_FORTIFY_INLINE
-void* memchr(const void *s, int c, size_t n) {
-    size_t bos = __bos(s);
-
-#if !defined(__clang__)
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __builtin_memchr(s, c, n);
-    }
-
-    if (__builtin_constant_p(n) && (n > bos)) {
-        __memchr_buf_size_error();
-    }
-
-    if (__builtin_constant_p(n) && (n <= bos)) {
-        return __builtin_memchr(s, c, n);
-    }
 #endif
 
-    return __memchr_chk(s, c, n, bos);
-}
-
-__BIONIC_FORTIFY_INLINE
-void* memrchr(const void *s, int c, size_t n) {
-    size_t bos = __bos(s);
-
-#if !defined(__clang__)
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __memrchr_real(s, c, n);
-    }
-
-    if (__builtin_constant_p(n) && (n > bos)) {
-        __memrchr_buf_size_error();
-    }
-
-    if (__builtin_constant_p(n) && (n <= bos)) {
-        return __memrchr_real(s, c, n);
-    }
+#if defined(__BIONIC_INCLUDE_FORTIFY_HEADERS)
+#include <bits/fortify/string.h>
 #endif
 
-    return __memrchr_chk(s, c, n, bos);
+/* Const-correct overloads. Placed after FORTIFY so we call those functions, if possible. */
+#if defined(__cplusplus)
+/* libcxx tries to provide these. Suppress that, since libcxx's impl doesn't respect FORTIFY. */
+#define __CORRECT_ISO_CPP_STRING_H_PROTO
+/* Used to make these preferable over regular <string.h> signatures for overload resolution. */
+#define __prefer_this_overload __enable_if(true, "")
+extern "C++" {
+inline __always_inline
+void* _Nullable __bionic_memchr(const void* _Nonnull const s __pass_object_size, int c, size_t n) {
+    return memchr(s, c, n);
 }
 
-__BIONIC_FORTIFY_INLINE
-void* memcpy(void* __restrict dest, const void* __restrict src, size_t copy_amount) {
-    return __builtin___memcpy_chk(dest, src, copy_amount, __bos0(dest));
+inline __always_inline
+const void* _Nullable memchr(const void* _Nonnull const s __pass_object_size, int c, size_t n)
+        __prefer_this_overload {
+    return __bionic_memchr(s, c, n);
 }
 
-__BIONIC_FORTIFY_INLINE
-void* memmove(void *dest, const void *src, size_t len) {
-    return __builtin___memmove_chk(dest, src, len, __bos0(dest));
+inline __always_inline
+void* _Nullable memchr(void* _Nonnull const s __pass_object_size, int c, size_t n) __prefer_this_overload {
+    return __bionic_memchr(s, c, n);
 }
 
-__BIONIC_FORTIFY_INLINE
-char* stpcpy(char* __restrict dest, const char* __restrict src) {
-    return __builtin___stpcpy_chk(dest, src, __bos(dest));
+inline __always_inline
+char* _Nullable __bionic_strchr(const char* _Nonnull const s __pass_object_size, int c) {
+    return strchr(s, c);
 }
 
-__BIONIC_FORTIFY_INLINE
-char* strcpy(char* __restrict dest, const char* __restrict src) {
-    return __builtin___strcpy_chk(dest, src, __bos(dest));
+inline __always_inline
+const char* _Nullable strchr(const char* _Nonnull const s __pass_object_size, int c)
+        __prefer_this_overload {
+    return __bionic_strchr(s, c);
 }
 
-__BIONIC_FORTIFY_INLINE
-char* stpncpy(char* __restrict dest, const char* __restrict src, size_t n) {
-    size_t bos_dest = __bos(dest);
-    size_t bos_src = __bos(src);
-
-    if (bos_src == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __builtin___stpncpy_chk(dest, src, n, bos_dest);
-    }
-
-    if (__builtin_constant_p(n) && (n <= bos_src)) {
-        return __builtin___stpncpy_chk(dest, src, n, bos_dest);
-    }
-
-    size_t slen = __builtin_strlen(src);
-    if (__builtin_constant_p(slen)) {
-        return __builtin___stpncpy_chk(dest, src, n, bos_dest);
-    }
-
-    return __stpncpy_chk2(dest, src, n, bos_dest, bos_src);
+inline __always_inline
+char* _Nullable strchr(char* _Nonnull const s __pass_object_size, int c)
+        __prefer_this_overload {
+    return __bionic_strchr(s, c);
 }
 
-__BIONIC_FORTIFY_INLINE
-char* strncpy(char* __restrict dest, const char* __restrict src, size_t n) {
-    size_t bos_dest = __bos(dest);
-    size_t bos_src = __bos(src);
-
-    if (bos_src == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __builtin___strncpy_chk(dest, src, n, bos_dest);
-    }
-
-    if (__builtin_constant_p(n) && (n <= bos_src)) {
-        return __builtin___strncpy_chk(dest, src, n, bos_dest);
-    }
-
-    size_t slen = __builtin_strlen(src);
-    if (__builtin_constant_p(slen)) {
-        return __builtin___strncpy_chk(dest, src, n, bos_dest);
-    }
-
-    return __strncpy_chk2(dest, src, n, bos_dest, bos_src);
+inline __always_inline
+char* _Nullable __bionic_strrchr(const char* _Nonnull const s __pass_object_size, int c) {
+    return strrchr(s, c);
 }
 
-__BIONIC_FORTIFY_INLINE
-char* strcat(char* __restrict dest, const char* __restrict src) {
-    return __builtin___strcat_chk(dest, src, __bos(dest));
+inline __always_inline
+const char* _Nullable strrchr(const char* _Nonnull const s __pass_object_size, int c) __prefer_this_overload {
+    return __bionic_strrchr(s, c);
 }
 
-__BIONIC_FORTIFY_INLINE
-char *strncat(char* __restrict dest, const char* __restrict src, size_t n) {
-    return __builtin___strncat_chk(dest, src, n, __bos(dest));
+inline __always_inline
+char* _Nullable strrchr(char* _Nonnull const s __pass_object_size, int c) __prefer_this_overload {
+    return __bionic_strrchr(s, c);
 }
 
-__BIONIC_FORTIFY_INLINE
-void* memset(void *s, int c, size_t n) {
-    return __builtin___memset_chk(s, c, n, __bos0(s));
+/* Functions with no FORTIFY counterpart. */
+inline __always_inline
+char* _Nullable __bionic_strstr(const char* _Nonnull h, const char* _Nonnull n) { return strstr(h, n); }
+
+inline __always_inline
+const char* _Nullable strstr(const char* _Nonnull h, const char* _Nonnull n) __prefer_this_overload {
+    return __bionic_strstr(h, n);
 }
 
-__BIONIC_FORTIFY_INLINE
-size_t strlcpy(char* __restrict dest, const char* __restrict src, size_t size) {
-    size_t bos = __bos(dest);
-
-#if !defined(__clang__)
-    // Compiler doesn't know destination size. Don't call __strlcpy_chk
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __strlcpy_real(dest, src, size);
-    }
-
-    // Compiler can prove, at compile time, that the passed in size
-    // is always <= the actual object size. Don't call __strlcpy_chk
-    if (__builtin_constant_p(size) && (size <= bos)) {
-        return __strlcpy_real(dest, src, size);
-    }
-#endif /* !defined(__clang__) */
-
-    return __strlcpy_chk(dest, src, size, bos);
+inline __always_inline
+char* _Nullable strstr(char* _Nonnull h, const char* _Nonnull n) __prefer_this_overload {
+    return __bionic_strstr(h, n);
 }
 
+inline __always_inline
+char* _Nullable __bionic_strpbrk(const char* _Nonnull h, const char* _Nonnull n) { return strpbrk(h, n); }
 
-__BIONIC_FORTIFY_INLINE
-size_t strlcat(char* __restrict dest, const char* __restrict src, size_t size) {
-    size_t bos = __bos(dest);
-
-#if !defined(__clang__)
-    // Compiler doesn't know destination size. Don't call __strlcat_chk
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __strlcat_real(dest, src, size);
-    }
-
-    // Compiler can prove, at compile time, that the passed in size
-    // is always <= the actual object size. Don't call __strlcat_chk
-    if (__builtin_constant_p(size) && (size <= bos)) {
-        return __strlcat_real(dest, src, size);
-    }
-#endif /* !defined(__clang__) */
-
-    return __strlcat_chk(dest, src, size, bos);
+inline __always_inline
+char* _Nullable strpbrk(char* _Nonnull h, const char* _Nonnull n) __prefer_this_overload {
+    return __bionic_strpbrk(h, n);
 }
 
-__BIONIC_FORTIFY_INLINE
-size_t strlen(const char *s) {
-    size_t bos = __bos(s);
-
-#if !defined(__clang__)
-    // Compiler doesn't know destination size. Don't call __strlen_chk
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __builtin_strlen(s);
-    }
-
-    size_t slen = __builtin_strlen(s);
-    if (__builtin_constant_p(slen)) {
-        return slen;
-    }
-#endif /* !defined(__clang__) */
-
-    return __strlen_chk(s, bos);
+inline __always_inline
+const char* _Nullable strpbrk(const char* _Nonnull h, const char* _Nonnull n) __prefer_this_overload {
+    return __bionic_strpbrk(h, n);
 }
-
-__BIONIC_FORTIFY_INLINE
-char* strchr(const char *s, int c) {
-    size_t bos = __bos(s);
-
-#if !defined(__clang__)
-    // Compiler doesn't know destination size. Don't call __strchr_chk
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __builtin_strchr(s, c);
-    }
-
-    size_t slen = __builtin_strlen(s);
-    if (__builtin_constant_p(slen) && (slen < bos)) {
-        return __builtin_strchr(s, c);
-    }
-#endif /* !defined(__clang__) */
-
-    return __strchr_chk(s, c, bos);
 }
-
-__BIONIC_FORTIFY_INLINE
-char* strrchr(const char *s, int c) {
-    size_t bos = __bos(s);
-
-#if !defined(__clang__)
-    // Compiler doesn't know destination size. Don't call __strrchr_chk
-    if (bos == __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-        return __builtin_strrchr(s, c);
-    }
-
-    size_t slen = __builtin_strlen(s);
-    if (__builtin_constant_p(slen) && (slen < bos)) {
-        return __builtin_strrchr(s, c);
-    }
-#endif /* !defined(__clang__) */
-
-    return __strrchr_chk(s, c, bos);
-}
-
-
-#endif /* defined(__BIONIC_FORTIFY) */
+#undef __prefer_this_overload
+#endif
 
 __END_DECLS
 
-#endif /* _STRING_H */
+#endif

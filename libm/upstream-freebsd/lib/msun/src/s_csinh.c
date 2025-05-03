@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2005 Bruce D. Evans and Steven G. Kargl
  * All rights reserved.
  *
@@ -35,9 +37,6 @@
  * The sign of the result for some exceptional values is unspecified but
  * must satisfy both sinh(conj(z)) == conj(sinh(z)) and sinh(-z) == -sinh(z).
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/s_csinh.c 284426 2015-06-15 20:16:53Z tijl $");
 
 #include <complex.h>
 #include <math.h>
@@ -143,7 +142,8 @@ csinh(double complex z)
 	 * Optionally raises the invalid floating-point exception for finite
 	 * nonzero y.  Choice = don't raise (except for signaling NaNs).
 	 */
-	return (CMPLX((x + x) * (y - y), (x * x) * (y - y)));
+	return (CMPLX(((long double)x + x) * (y - y),
+	    ((long double)x * x) * (y - y)));
 }
 
 double complex

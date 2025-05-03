@@ -28,11 +28,8 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "cache.h"
+#include <private/bionic_asm.h>
 
-#ifndef MEMSET
-# define MEMSET		memset
-#endif
 
 #ifndef L
 # define L(label)	.L##label
@@ -42,39 +39,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # define ALIGN(n)	.p2align n
 #endif
 
-#ifndef cfi_startproc
-# define cfi_startproc			.cfi_startproc
-#endif
 
-#ifndef cfi_endproc
-# define cfi_endproc			.cfi_endproc
-#endif
+ENTRY(__memset_chk_generic)
+  # %rdi = dst, %rsi = byte, %rdx = n, %rcx = dst_len
+  cmp %rcx, %rdx
+  ja __memset_chk_fail
+  // Fall through to memset...
+END(__memset_chk_generic)
 
-#ifndef ENTRY
-# define ENTRY(name)			\
-	.type name,  @function;	\
-	.globl name;			\
-name:					\
-	cfi_startproc
-#endif
-
-#ifndef END
-# define END(name)			\
-	cfi_endproc;			\
-	.size name, .-name
-#endif
 
 	.section .text.sse2,"ax",@progbits
-ENTRY (MEMSET)
+ENTRY(memset_generic)
 	movq	%rdi, %rax
-#ifdef USE_AS_BZERO_P
-	mov	%rsi, %rdx
-	xor	%rcx, %rcx
-#else
 	and	$0xff, %rsi
 	mov	$0x0101010101010101, %rcx
 	imul	%rsi, %rcx
-#endif
 	cmpq	$16, %rdx
 	jae	L(16bytesormore)
 	testb	$8, %dl
@@ -106,12 +85,8 @@ L(2_3bytes):
 
 	ALIGN (4)
 L(16bytesormore):
-#ifdef USE_AS_BZERO_P
-	pxor	%xmm0, %xmm0
-#else
 	movd	%rcx, %xmm0
 	pshufd	$0, %xmm0, %xmm0
-#endif
 	movdqu	%xmm0, (%rdi)
 	movdqu	%xmm0, -16(%rdi, %rdx)
 	cmpq	$32, %rdx
@@ -140,11 +115,8 @@ L(128bytesmore):
 	cmpq	%rcx, %rdx
 	je	L(return)
 
-#ifdef SHARED_CACHE_SIZE
-	cmp	$SHARED_CACHE_SIZE, %r8
-#else
-	cmp	__x86_64_shared_cache_size(%rip), %r8
-#endif
+	cmp	__x86_shared_cache_size(%rip), %r8
+
 	ja	L(128bytesmore_nt)
 
 	ALIGN (4)
@@ -170,4 +142,4 @@ L(128bytesmore_nt):
 	sfence
 	ret
 
-END (MEMSET)
+END(memset_generic)

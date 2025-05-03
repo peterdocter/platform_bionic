@@ -13,11 +13,8 @@
  * ====================================================
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 /*
- * __ieee754_fmodf(x,y)
+ * fmodf(x,y)
  * Return x mod y in exact arithmetic
  * Method: shift and subtract
  */
@@ -28,7 +25,7 @@ __FBSDID("$FreeBSD$");
 static const float one = 1.0, Zero[] = {0.0, -0.0,};
 
 float
-__ieee754_fmodf(float x, float y)
+fmodf(float x, float y)
 {
 	int32_t n,hx,hy,hz,ix,iy,sx,i;
 
@@ -41,7 +38,7 @@ __ieee754_fmodf(float x, float y)
     /* purge off exception values */
 	if(hy==0||(hx>=0x7f800000)||		/* y=0,or x not finite */
 	   (hy>0x7f800000))			/* or y is NaN */
-	    return (x*y)/(x*y);
+	    return nan_mix_op(x, y, *)/nan_mix_op(x, y, *);
 	if(hx<hy) return x;			/* |x|<|y| return x */
 	if(hx==hy)
 	    return Zero[(u_int32_t)sx>>31];	/* |x|=|y| return x*0*/

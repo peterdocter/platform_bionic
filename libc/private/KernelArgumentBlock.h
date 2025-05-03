@@ -14,17 +14,14 @@
  * limitations under the License.
  */
 
-#ifndef KERNEL_ARGUMENT_BLOCK_H
-#define KERNEL_ARGUMENT_BLOCK_H
+#pragma once
 
 #include <elf.h>
 #include <link.h>
 #include <stdint.h>
 #include <sys/auxv.h>
 
-#include "private/bionic_macros.h"
-
-struct abort_msg_t;
+#include "platform/bionic/macros.h"
 
 // When the kernel starts the dynamic linker, it passes a pointer to a block
 // of memory containing argc, the argv array, the environment variable array,
@@ -32,37 +29,30 @@ struct abort_msg_t;
 // constituents for easy access.
 class KernelArgumentBlock {
  public:
-  KernelArgumentBlock(void* raw_args) {
+  __attribute__((no_sanitize("hwaddress"))) explicit KernelArgumentBlock(void* raw_args) {
     uintptr_t* args = reinterpret_cast<uintptr_t*>(raw_args);
     argc = static_cast<int>(*args);
     argv = reinterpret_cast<char**>(args + 1);
     envp = argv + argc + 1;
 
-    // Skip over all environment variable definitions to find aux vector.
-    // The end of the environment block is marked by two NULL pointers.
+    // Skip over all environment variable definitions to find the aux vector.
+    // The end of the environment block is marked by a NULL pointer.
     char** p = envp;
-    while (*p != NULL) {
+    while (*p != nullptr) {
       ++p;
     }
-    ++p; // Skip second NULL;
+    ++p; // Skip the NULL itself.
 
     auxv = reinterpret_cast<ElfW(auxv_t)*>(p);
   }
 
   // Similar to ::getauxval but doesn't require the libc global variables to be set up,
-  // so it's safe to call this really early on. This function also lets you distinguish
-  // between the inability to find the given type and its value just happening to be 0.
-  unsigned long getauxval(unsigned long type, bool* found_match = NULL) {
+  // so it's safe to call this really early on.
+  __attribute__((no_sanitize("hwaddress"))) unsigned long getauxval(unsigned long type) {
     for (ElfW(auxv_t)* v = auxv; v->a_type != AT_NULL; ++v) {
       if (v->a_type == type) {
-        if (found_match != NULL) {
-            *found_match = true;
-        }
         return v->a_un.a_val;
       }
-    }
-    if (found_match != NULL) {
-      *found_match = false;
     }
     return 0;
   }
@@ -72,10 +62,6 @@ class KernelArgumentBlock {
   char** envp;
   ElfW(auxv_t)* auxv;
 
-  abort_msg_t** abort_message_ptr;
-
  private:
-  DISALLOW_COPY_AND_ASSIGN(KernelArgumentBlock);
+  BIONIC_DISALLOW_COPY_AND_ASSIGN(KernelArgumentBlock);
 };
-
-#endif // KERNEL_ARGUMENT_BLOCK_H

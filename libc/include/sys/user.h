@@ -26,18 +26,17 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _SYS_USER_H_
-#define _SYS_USER_H_
+#pragma once
 
 #include <sys/cdefs.h>
 #include <stddef.h> /* For size_t. */
+#include <stdint.h>
+
+#include <bits/page_size.h>
 
 __BEGIN_DECLS
 
-#define PAGE_SIZE 4096
-#define PAGE_MASK (~(PAGE_SIZE - 1))
-
-#if __i386__
+#if defined(__i386__)
 
 struct user_fpregs_struct {
   long cwd;
@@ -101,6 +100,10 @@ struct user {
   int u_debugreg[8];
 };
 
+#define UPAGES 1
+#define HOST_TEXT_START_ADDR (u.start_code)
+#define HOST_STACK_END_ADDR (u.start_stack + u.u_ssize * PAGE_SIZE)
+
 #elif defined(__x86_64__)
 
 struct user_fpregs_struct {
@@ -108,13 +111,13 @@ struct user_fpregs_struct {
   unsigned short swd;
   unsigned short ftw;
   unsigned short fop;
-  __u64 rip;
-  __u64 rdp;
-  __u32 mxcsr;
-  __u32 mxcr_mask;
-  __u32 st_space[32];
-  __u32 xmm_space[64];
-  __u32 padding[24];
+  unsigned long rip;
+  unsigned long rdp;
+  unsigned int mxcsr;
+  unsigned int mxcr_mask;
+  unsigned int st_space[32];
+  unsigned int xmm_space[64];
+  unsigned int padding[24];
 };
 struct user_regs_struct {
   unsigned long r15;
@@ -165,22 +168,6 @@ struct user {
   unsigned long u_debugreg[8];
   unsigned long error_code;
   unsigned long fault_address;
-};
-
-#elif defined(__mips__)
-
-struct user {
-  unsigned long regs[180 / sizeof(unsigned long) + 64];
-  size_t u_tsize;
-  size_t u_dsize;
-  size_t u_ssize;
-  unsigned long start_code;
-  unsigned long start_data;
-  unsigned long start_stack;
-  long int signal;
-  void* u_ar0;
-  unsigned long magic;
-  char u_comm[32];
 };
 
 #elif defined(__arm__)
@@ -244,6 +231,11 @@ struct user_fpsimd_struct {
   uint32_t fpcr;
 };
 
+#elif defined(__riscv)
+
+// This space deliberately left blank for now.
+// No other libcs have any riscv64-specific structs.
+
 #else
 
 #error "Unsupported architecture."
@@ -251,5 +243,3 @@ struct user_fpsimd_struct {
 #endif
 
 __END_DECLS
-
-#endif  /* _SYS_USER_H_ */

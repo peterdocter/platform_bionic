@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef ERRNO_RESTORER_H
-#define ERRNO_RESTORER_H
+#pragma once
 
 #include <errno.h>
 
-#include "bionic_macros.h"
+#include "platform/bionic/macros.h"
 
 class ErrnoRestorer {
  public:
@@ -37,7 +36,5 @@ class ErrnoRestorer {
  private:
   int saved_errno_;
 
-  DISALLOW_COPY_AND_ASSIGN(ErrnoRestorer);
+  BIONIC_DISALLOW_COPY_AND_ASSIGN(ErrnoRestorer);
 };
-
-#endif // ERRNO_RESTORER_H

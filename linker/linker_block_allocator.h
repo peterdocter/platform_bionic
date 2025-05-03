@@ -1,25 +1,40 @@
 /*
  * Copyright (C) 2014 The Android Open Source Project
+ * All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
-#ifndef __LINKER_BLOCK_ALLOCATOR_H
-#define __LINKER_BLOCK_ALLOCATOR_H
+#pragma once
 
 #include <stdlib.h>
 #include <limits.h>
-#include "private/bionic_macros.h"
+
+#include <android-base/macros.h>
+
+static constexpr size_t kBlockSizeAlign = sizeof(void*);
+static constexpr size_t kBlockSizeMin = sizeof(void*) * 2;
 
 struct LinkerBlockAllocatorPage;
 
@@ -38,6 +53,9 @@ class LinkerBlockAllocator {
   void free(void* block);
   void protect_all(int prot);
 
+  // Purge all pages if all previously allocated blocks have been freed.
+  void purge();
+
  private:
   void create_new_page();
   LinkerBlockAllocatorPage* find_page(void* block);
@@ -45,6 +63,7 @@ class LinkerBlockAllocator {
   size_t block_size_;
   LinkerBlockAllocatorPage* page_list_;
   void* free_block_list_;
+  size_t allocated_;
 
   DISALLOW_COPY_AND_ASSIGN(LinkerBlockAllocator);
 };
@@ -54,17 +73,17 @@ class LinkerBlockAllocator {
  * of a single fixed-size type. Allocations are backed by page-sized private
  * anonymous mmaps.
  *
- * The differences between this allocator and LinkerMemoryAllocator are:
- * 1. This allocator manages space more efficiently. LinkerMemoryAllocator
- *    operates in power-of-two sized blocks up to 1k, when this implementation
- *    splits the page to aligned size of structure; For example for structures
- *    with size 513 this allocator will use 516 (520 for lp64) bytes of data
- *    where generalized implementation is going to use 1024 sized blocks.
+ * The differences between this allocator and BionicAllocator are:
+ * 1. This allocator manages space more efficiently. BionicAllocator operates in
+ *    power-of-two sized blocks up to 1k, when this implementation splits the
+ *    page to aligned size of structure; For example for structures with size
+ *    513 this allocator will use 516 (520 for lp64) bytes of data where
+ *    generalized implementation is going to use 1024 sized blocks.
  *
- * 2. This allocator does not munmap allocated memory, where LinkerMemoryAllocator does.
+ * 2. This allocator does not munmap allocated memory, where BionicAllocator does.
  *
- * 3. This allocator provides mprotect services to the user, where LinkerMemoryAllocator
- *    always treats it's memory as READ|WRITE.
+ * 3. This allocator provides mprotect services to the user, where BionicAllocator
+ *    always treats its memory as READ|WRITE.
  */
 template<typename T>
 class LinkerTypeAllocator {
@@ -77,5 +96,3 @@ class LinkerTypeAllocator {
   LinkerBlockAllocator block_allocator_;
   DISALLOW_COPY_AND_ASSIGN(LinkerTypeAllocator);
 };
-
-#endif // __LINKER_BLOCK_ALLOCATOR_H

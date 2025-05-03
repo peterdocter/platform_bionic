@@ -14,50 +14,46 @@
  * limitations under the License.
  */
 
-#include <errno.h>
 #include <new>
+
 #include <stdlib.h>
 
-#include "private/libc_logging.h"
+#include <async_safe/log.h>
 
-const std::nothrow_t std::nothrow = {};
+__attribute__((weak)) const std::nothrow_t std::nothrow = {};
 
+// We can't throw in bionic, so we go straight to the equivalent of
+// std::terminate for these two instead.
 void* operator new(std::size_t size) {
     void* p = malloc(size);
-    if (p == NULL) {
-        __libc_fatal("new failed to allocate %zu bytes", size);
+    if (p == nullptr) {
+        async_safe_fatal("new failed to allocate %zu bytes", size);
     }
     return p;
 }
-
 void* operator new[](std::size_t size) {
     void* p = malloc(size);
-    if (p == NULL) {
-        __libc_fatal("new[] failed to allocate %zu bytes", size);
+    if (p == nullptr) {
+        async_safe_fatal("new[] failed to allocate %zu bytes", size);
     }
     return p;
 }
 
-void  operator delete(void* ptr) throw() {
-    free(ptr);
-}
-
-void  operator delete[](void* ptr) throw() {
-    free(ptr);
-}
-
+// These two are the "nothrow" variants, so we just return nullptr on failure.
 void* operator new(std::size_t size, const std::nothrow_t&) {
     return malloc(size);
 }
-
 void* operator new[](std::size_t size, const std::nothrow_t&) {
     return malloc(size);
 }
 
-void  operator delete(void* ptr, const std::nothrow_t&) throw() {
-    free(ptr);
-}
+// free() can't throw anyway (except on heap corruption, which is always fatal),
+// so there's no difference between the regular and "nothrow" variants here.
+void operator delete(void* p) noexcept { free(p); }
+void operator delete[](void* p) noexcept { free(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { free(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { free(p); }
 
-void  operator delete[](void* ptr, const std::nothrow_t&) throw() {
-    free(ptr);
-}
+// TODO: these can use free_sized() once we have it (http://b/284321795).
+void operator delete(void* p, std::size_t) noexcept { free(p); }
+void operator delete[](void* p, std::size_t) noexcept { free(p); }

@@ -114,10 +114,7 @@ strtod
 	static int dplen;
 	if (!(s0 = decimalpoint_cache)) {
 		s0 = localeconv()->decimal_point;
-		if ((decimalpoint_cache = (char*)MALLOC(strlen(s0) + 1))) {
-			strlcpy(decimalpoint_cache, s0, strlen(s0) + 1);
-			s0 = decimalpoint_cache;
-			}
+		decimalpoint_cache = strdup(s0);
 		dplen = strlen(s0);
 		}
 	decimalpoint = (char*)s0;
@@ -1102,4 +1099,4 @@ strtod
 		*se = (char *)s;
 	return sign ? -dval(&rv) : dval(&rv);
 	}
-
+DEF_STRONG(strtod);

@@ -20,47 +20,30 @@
 #include <unistd.h>
 
 #include <string>
+#include <vector>
+
+#include <android-base/file.h>
+
+using namespace std::literals;
 
 #if defined(__BIONIC__)
 
-#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
-#include <sys/_system_properties.h>
+#include <sys/system_properties.h>
 
-#include <benchmark/Benchmark.h>
-
-extern void* __system_property_area__;
-
-// Do not exceed 512, that is about the largest number of properties
-// that can be created with the current property area size.
-#define TEST_NUM_PROPS \
-    Arg(1)->Arg(4)->Arg(16)->Arg(64)->Arg(128)->Arg(256)->Arg(512)
+#include <benchmark/benchmark.h>
+#include <system_properties/system_properties.h>
+#include "util.h"
 
 struct LocalPropertyTestState {
-  LocalPropertyTestState(int nprops) : nprops(nprops), valid(false) {
+  explicit LocalPropertyTestState(int nprops)
+      : nprops(nprops), valid(false), system_properties_(false) {
     static const char prop_name_chars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.";
 
-    const char* android_data = getenv("ANDROID_DATA");
-    if (android_data == NULL) {
-      printf("ANDROID_DATA environment variable not set\n");
-      return;
+    valid = system_properties_.AreaInit(dir_.path, nullptr, true);
+    if (!valid) {
+      printf("Failed to initialize properties, terminating...\n");
+      exit(1);
     }
-    char dir_template[PATH_MAX];
-    snprintf(dir_template, sizeof(dir_template), "%s/local/tmp/prop-XXXXXX", android_data);
-    char* dirname = mkdtemp(dir_template);
-    if (!dirname) {
-      printf("making temp file for test state failed (is %s/local/tmp writable?): %s\n",
-             android_data, strerror(errno));
-      return;
-    }
-
-    old_pa = __system_property_area__;
-    __system_property_area__ = NULL;
-
-    pa_dirname = dirname;
-    pa_filename = pa_dirname + "/__properties__";
-
-    __system_property_set_filename(pa_filename.c_str());
-    __system_property_area_init();
 
     names = new char* [nprops];
     name_lens = new int[nprops];
@@ -97,7 +80,7 @@ struct LocalPropertyTestState {
         values[i][j] = prop_name_chars[random() % (sizeof(prop_name_chars) - 1)];
       }
 
-      if (__system_property_add(names[i], name_lens[i], values[i], value_lens[i]) < 0) {
+      if (system_properties_.Add(names[i], name_lens[i], values[i], value_lens[i]) < 0) {
         printf("Failed to add a property, terminating...\n");
         printf("%s = %.*s\n", names[i], value_lens[i], values[i]);
         exit(1);
@@ -107,15 +90,19 @@ struct LocalPropertyTestState {
     valid = true;
   }
 
+  SystemProperties& system_properties() {
+    return system_properties_;
+  }
+
   ~LocalPropertyTestState() {
-    if (!valid)
+    if (!valid) {
       return;
+    }
 
-    __system_property_area__ = old_pa;
-
-    __system_property_set_filename(PROP_FILENAME);
-    unlink(pa_filename.c_str());
-    rmdir(pa_dirname.c_str());
+    system_properties_.contexts_->FreeAndUnmap();
+    if (system_properties_.appcompat_override_contexts_) {
+      system_properties_.appcompat_override_contexts_->FreeAndUnmap();
+    }
 
     for (int i = 0; i < nprops; i++) {
       delete names[i];
@@ -126,7 +113,8 @@ struct LocalPropertyTestState {
     delete[] values;
     delete[] value_lens;
   }
-public:
+
+ public:
   const int nprops;
   char** names;
   int* name_lens;
@@ -134,100 +122,104 @@ public:
   int* value_lens;
   bool valid;
 
-private:
-  std::string pa_dirname;
-  std::string pa_filename;
-  void* old_pa;
+ private:
+  SystemProperties system_properties_;
+  TemporaryDir dir_;
 };
 
-BENCHMARK_WITH_ARG(BM_property_get, int)->TEST_NUM_PROPS;
-void BM_property_get::Run(int iters, int nprops) {
-  StopBenchmarkTiming();
+static void BM_property_get(benchmark::State& state) {
+  const size_t nprops = state.range(0);
 
   LocalPropertyTestState pa(nprops);
-  char value[PROP_VALUE_MAX];
+  if (!pa.valid) return;
 
-  if (!pa.valid)
-    return;
-
-  srandom(iters * nprops);
-
-  StartBenchmarkTiming();
-
-  for (int i = 0; i < iters; i++) {
-    __system_property_get(pa.names[random() % nprops], value);
+  while (state.KeepRunning()) {
+    char value[PROP_VALUE_MAX];
+    pa.system_properties().Get(pa.names[random() % nprops], value);
   }
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK_WITH_ARG(BM_property_get, "NUM_PROPS");
 
-BENCHMARK_WITH_ARG(BM_property_find, int)->TEST_NUM_PROPS;
-void BM_property_find::Run(int iters, int nprops) {
-  StopBenchmarkTiming();
+static void BM_property_find(benchmark::State& state) {
+  const size_t nprops = state.range(0);
 
   LocalPropertyTestState pa(nprops);
+  if (!pa.valid) return;
 
-  if (!pa.valid)
-    return;
-
-  srandom(iters * nprops);
-
-  StartBenchmarkTiming();
-
-  for (int i = 0; i < iters; i++) {
-    __system_property_find(pa.names[random() % nprops]);
+  while (state.KeepRunning()) {
+    pa.system_properties().Find(pa.names[random() % nprops]);
   }
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK_WITH_ARG(BM_property_find, "NUM_PROPS");
 
-BENCHMARK_WITH_ARG(BM_property_read, int)->TEST_NUM_PROPS;
-void BM_property_read::Run(int iters, int nprops) {
-  StopBenchmarkTiming();
+static void BM_property_read(benchmark::State& state) {
+  const size_t nprops = state.range(0);
 
   LocalPropertyTestState pa(nprops);
+  if (!pa.valid) return;
 
-  if (!pa.valid)
-    return;
-
-  srandom(iters * nprops);
-  const prop_info** pinfo = new const prop_info*[iters];
+  const prop_info** pinfo = new const prop_info*[nprops];
   char propvalue[PROP_VALUE_MAX];
 
-  for (int i = 0; i < iters; i++) {
-    pinfo[i] = __system_property_find(pa.names[random() % nprops]);
+  for (size_t i = 0; i < nprops; ++i) {
+    pinfo[i] = pa.system_properties().Find(pa.names[random() % nprops]);
   }
 
-  StartBenchmarkTiming();
-  for (int i = 0; i < iters; i++) {
-    __system_property_read(pinfo[i], 0, propvalue);
+  size_t i = 0;
+  while (state.KeepRunning()) {
+    pa.system_properties().Read(pinfo[i], nullptr, propvalue);
+    i = (i + 1) % nprops;
   }
-  StopBenchmarkTiming();
 
   delete[] pinfo;
 }
+BIONIC_BENCHMARK_WITH_ARG(BM_property_read, "NUM_PROPS");
 
-BENCHMARK_WITH_ARG(BM_property_serial, int)->TEST_NUM_PROPS;
-void BM_property_serial::Run(int iters, int nprops) {
-  StopBenchmarkTiming();
+static void BM_property_serial(benchmark::State& state) {
+  const size_t nprops = state.range(0);
 
   LocalPropertyTestState pa(nprops);
+  if (!pa.valid) return;
 
-  if (!pa.valid)
-    return;
-
-  srandom(iters * nprops);
-  const prop_info** pinfo = new const prop_info*[iters];
-
-  for (int i = 0; i < iters; i++) {
-    pinfo[i] = __system_property_find(pa.names[random() % nprops]);
+  const prop_info** pinfo = new const prop_info*[nprops];
+  for (size_t i = 0; i < nprops; ++i) {
+    pinfo[i] = pa.system_properties().Find(pa.names[random() % nprops]);
   }
 
-  StartBenchmarkTiming();
-  for (int i = 0; i < iters; i++) {
+  size_t i = 0;
+  while (state.KeepRunning()) {
     __system_property_serial(pinfo[i]);
+    i = (i + 1) % nprops;
   }
-  StopBenchmarkTiming();
 
   delete[] pinfo;
 }
+BIONIC_BENCHMARK_WITH_ARG(BM_property_serial, "NUM_PROPS");
+
+// This benchmarks find the actual properties currently set on the system and accessible by the
+// user that runs this benchmark (aka this is best run as root).  It is not comparable between
+// devices, nor even boots, but is useful to understand the the real end-to-end speed, including
+// costs to find the correct property file within /dev/__properties__.
+static void BM_property_find_real(benchmark::State& state) {
+  std::vector<std::string> properties;
+  __system_property_foreach(
+      [](const prop_info* pi, void* cookie) {
+        __system_property_read_callback(pi,
+                                        [](void* cookie, const char* name, const char*, unsigned) {
+                                          auto properties =
+                                              reinterpret_cast<std::vector<std::string>*>(cookie);
+                                          properties->emplace_back(name);
+                                        },
+                                        cookie);
+      },
+      &properties);
+
+  while (state.KeepRunning()) {
+    for (const auto& property : properties) {
+      __system_property_find(property.c_str());
+    }
+  }
+}
+BIONIC_BENCHMARK(BM_property_find_real);
 
 #endif  // __BIONIC__

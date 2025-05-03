@@ -1,4 +1,4 @@
-/*	$OpenBSD: fvwrite.c,v 1.17 2009/11/09 00:18:27 kurt Exp $ */
+/*	$OpenBSD: fvwrite.c,v 1.22 2024/04/28 14:28:02 millert Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -31,10 +31,11 @@
  * SUCH DAMAGE.
  */
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
+#include <unistd.h>
 #include "local.h"
 #include "fvwrite.h"
 
@@ -57,13 +58,11 @@ __sfvwrite(FILE *fp, struct __suio *uio)
 	if ((len = uio->uio_resid) == 0)
 		return (0);
 	/* make sure we can write */
-	if (cantwrite(fp)) {
-		errno = EBADF;
+	if (cantwrite(fp))
 		return (EOF);
-	}
 
 #define	MIN(a, b) ((a) < (b) ? (a) : (b))
-#define	COPY(n)	  (void)memcpy((void *)fp->_p, (void *)p, (size_t)(n))
+#define	COPY(n)	  (void)memcpy(fp->_p, p, n)
 
 	iov = uio->uio_iov;
 	p = iov->iov_base;
@@ -78,11 +77,12 @@ __sfvwrite(FILE *fp, struct __suio *uio)
 	}
 	if (fp->_flags & __SNBF) {
 		/*
-		 * Unbuffered: write up to BUFSIZ bytes at a time.
+		 * Unbuffered: write up to INT_MAX bytes at a time, to not
+		 * truncate the value of len if it is greater than 2^31 bytes.
 		 */
 		do {
 			GETIOV(;);
-			w = (*fp->_write)(fp->_cookie, p, MIN(len, BUFSIZ));
+			w = (*fp->_write)(fp->_cookie, p, MIN(len, INT_MAX));
 			if (w <= 0)
 				goto err;
 			p += w;
@@ -92,7 +92,8 @@ __sfvwrite(FILE *fp, struct __suio *uio)
 		/*
 		 * Fully buffered: fill partially full buffer, if any,
 		 * and then flush.  If there is no partial buffer, write
-		 * one _bf._size byte chunk directly (without copying).
+		 * entire payload directly (without copying) up to a
+		 * multiple of the buffer size.
 		 *
 		 * String output is a special case: write as many bytes
 		 * as fit, but pretend we wrote everything.  This makes
@@ -105,15 +106,14 @@ __sfvwrite(FILE *fp, struct __suio *uio)
 			if ((fp->_flags & (__SALC | __SSTR)) ==
 			    (__SALC | __SSTR) && fp->_w < len) {
 				size_t blen = fp->_p - fp->_bf._base;
+				int pgmsk = getpagesize() - 1;
 				unsigned char *_base;
 				int _size;
 
-				/* Allocate space exponentially. */
-				_size = fp->_bf._size;
-				do {
-					_size = (_size << 1) + 1;
-				} while (_size < blen + len);
-				_base = realloc(fp->_bf._base, _size + 1);
+				/* Round up to nearest page. */
+				_size = ((blen + len + 1 + pgmsk) & ~pgmsk) - 1;
+				_base = recallocarray(fp->_bf._base,
+				    fp->_bf._size + 1, _size + 1, 1);
 				if (_base == NULL)
 					goto err;
 				fp->_w += _size - fp->_bf._size;
@@ -137,7 +137,15 @@ __sfvwrite(FILE *fp, struct __suio *uio)
 				if (__sflush(fp))
 					goto err;
 			} else if (len >= (w = fp->_bf._size)) {
-				/* write directly */
+				/*
+				 * Write directly up to INT_MAX or greatest
+				 * multiple of buffer size (whichever is
+				 * smaller), keeping in the memory buffer the
+				 * remaining part of payload that is smaller
+				 * than buffer size.
+				 */
+				if (w != 0)
+					w = MIN(w * (len / w), INT_MAX);
 				w = (*fp->_write)(fp->_cookie, p, w);
 				if (w <= 0)
 					goto err;
@@ -164,7 +172,7 @@ __sfvwrite(FILE *fp, struct __suio *uio)
 		do {
 			GETIOV(nlknown = 0);
 			if (!nlknown) {
-				nl = memchr((void *)p, '\n', len);
+				nl = memchr(p, '\n', len);
 				nldist = nl ? nl + 1 - p : len + 1;
 				nlknown = 1;
 			}

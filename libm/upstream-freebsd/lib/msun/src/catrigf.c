@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2012 Stephen Montgomery-Smith <stephen@FreeBSD.ORG>
  * All rights reserved.
  *
@@ -38,9 +40,6 @@
  * a few comments on the right of declarations remain.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/catrigf.c 275819 2014-12-16 09:21:56Z ed $");
-
 #include <complex.h>
 #include <float.h>
 
@@ -51,7 +50,7 @@ __FBSDID("$FreeBSD: head/lib/msun/src/catrigf.c 275819 2014-12-16 09:21:56Z ed $
 #define isinf(x)	(fabsf(x) == INFINITY)
 #undef isnan
 #define isnan(x)	((x) != (x))
-#define	raise_inexact()	do { volatile float junk = 1 + tiny; } while(0)
+#define	raise_inexact()	do { volatile float junk __unused = 1 + tiny; } while(0)
 #undef signbit
 #define signbit(x)	(__builtin_signbitf(x))
 
@@ -161,7 +160,7 @@ casinhf(float complex z)
 			return (CMPLXF(y, x + x));
 		if (y == 0)
 			return (CMPLXF(x + x, y));
-		return (CMPLXF(x + 0.0L + (y + 0), x + 0.0L + (y + 0)));
+		return (CMPLXF(nan_mix(x, y), nan_mix(x, y)));
 	}
 
 	if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
@@ -219,7 +218,7 @@ cacosf(float complex z)
 			return (CMPLXF(x + x, -y));
 		if (x == 0)
 			return (CMPLXF(pio2_hi + pio2_lo, y + y));
-		return (CMPLXF(x + 0.0L + (y + 0), x + 0.0L + (y + 0)));
+		return (CMPLXF(nan_mix(x, y), nan_mix(x, y)));
 	}
 
 	if (ax > RECIP_EPSILON || ay > RECIP_EPSILON) {
@@ -357,7 +356,7 @@ catanhf(float complex z)
 		if (isinf(y))
 			return (CMPLXF(copysignf(0, x),
 			    copysignf(pio2_hi + pio2_lo, y)));
-		return (CMPLXF(x + 0.0L + (y + 0), x + 0.0L + (y + 0)));
+		return (CMPLXF(nan_mix(x, y), nan_mix(x, y)));
 	}
 
 	if (ax > RECIP_EPSILON || ay > RECIP_EPSILON)

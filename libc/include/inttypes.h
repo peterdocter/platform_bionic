@@ -19,8 +19,8 @@
 #ifndef	_INTTYPES_H_
 #define	_INTTYPES_H_
 
-#include <stdint.h>
 #include <sys/cdefs.h>
+#include <stdint.h>
 
 #ifdef __LP64__
 #define __PRI_64_prefix  "l"
@@ -29,6 +29,7 @@
 #define __PRI_64_prefix "ll"
 #define __PRI_PTR_prefix
 #endif
+#define __PRI_FAST_prefix __PRI_PTR_prefix
 
 /*
  * 7.8.1 Macros for format specifiers
@@ -58,8 +59,8 @@
 #define	PRIdLEAST64		__PRI_64_prefix"d"		/* int_least64_t */
 
 #define	PRIdFAST8		"d"		/* int_fast8_t */
-#define	PRIdFAST16		"d"		/* int_fast16_t */
-#define	PRIdFAST32		"d"		/* int_fast32_t */
+#define	PRIdFAST16		__PRI_FAST_prefix"d"	/* int_fast16_t */
+#define	PRIdFAST32		__PRI_FAST_prefix"d"	/* int_fast32_t */
 #define	PRIdFAST64		__PRI_64_prefix"d"		/* int_fast64_t */
 
 #define	PRIdMAX			"jd"		/* intmax_t */
@@ -76,14 +77,50 @@
 #define	PRIiLEAST64		__PRI_64_prefix"i"		/* int_least64_t */
 
 #define	PRIiFAST8		"i"		/* int_fast8_t */
-#define	PRIiFAST16		"i"		/* int_fast16_t */
-#define	PRIiFAST32		"i"		/* int_fast32_t */
+#define	PRIiFAST16		__PRI_FAST_prefix"i"	/* int_fast16_t */
+#define	PRIiFAST32		__PRI_FAST_prefix"i"	/* int_fast32_t */
 #define	PRIiFAST64		__PRI_64_prefix"i"		/* int_fast64_t */
 
 #define	PRIiMAX			"ji"		/* intmax_t */
 #define	PRIiPTR			__PRI_PTR_prefix"i"		/* intptr_t */
 
 /* fprintf macros for unsigned integers */
+#define	PRIb8			"b"		/* int8_t */
+#define	PRIb16			"b"		/* int16_t */
+#define	PRIb32			"b"		/* int32_t */
+#define	PRIb64			__PRI_64_prefix"b"		/* int64_t */
+
+#define	PRIbLEAST8		"b"		/* int_least8_t */
+#define	PRIbLEAST16		"b"		/* int_least16_t */
+#define	PRIbLEAST32		"b"		/* int_least32_t */
+#define	PRIbLEAST64		__PRI_64_prefix"b"		/* int_least64_t */
+
+#define	PRIbFAST8		"b"		/* int_fast8_t */
+#define	PRIbFAST16		__PRI_FAST_prefix"b"	/* int_fast16_t */
+#define	PRIbFAST32		__PRI_FAST_prefix"b"	/* int_fast32_t */
+#define	PRIbFAST64		__PRI_64_prefix"b"		/* int_fast64_t */
+
+#define	PRIbMAX			"jb"		/* intmax_t */
+#define	PRIbPTR			__PRI_PTR_prefix"b"		/* intptr_t */
+
+#define	PRIB8			"B"		/* int8_t */
+#define	PRIB16			"B"		/* int16_t */
+#define	PRIB32			"B"		/* int32_t */
+#define	PRIB64			__PRI_64_prefix"B"		/* int64_t */
+
+#define	PRIBLEAST8		"B"		/* int_least8_t */
+#define	PRIBLEAST16		"B"		/* int_least16_t */
+#define	PRIBLEAST32		"B"		/* int_least32_t */
+#define	PRIBLEAST64		__PRI_64_prefix"B"		/* int_least64_t */
+
+#define	PRIBFAST8		"B"		/* int_fast8_t */
+#define	PRIBFAST16		__PRI_FAST_prefix"B"	/* int_fast16_t */
+#define	PRIBFAST32		__PRI_FAST_prefix"B"	/* int_fast32_t */
+#define	PRIBFAST64		__PRI_64_prefix"B"		/* int_fast64_t */
+
+#define	PRIBMAX			"jB"		/* intmax_t */
+#define	PRIBPTR			__PRI_PTR_prefix"B"		/* intptr_t */
+
 #define	PRIo8			"o"		/* int8_t */
 #define	PRIo16			"o"		/* int16_t */
 #define	PRIo32			"o"		/* int32_t */
@@ -95,8 +132,8 @@
 #define	PRIoLEAST64		__PRI_64_prefix"o"		/* int_least64_t */
 
 #define	PRIoFAST8		"o"		/* int_fast8_t */
-#define	PRIoFAST16		"o"		/* int_fast16_t */
-#define	PRIoFAST32		"o"		/* int_fast32_t */
+#define	PRIoFAST16		__PRI_FAST_prefix"o"	/* int_fast16_t */
+#define	PRIoFAST32		__PRI_FAST_prefix"o"	/* int_fast32_t */
 #define	PRIoFAST64		__PRI_64_prefix"o"		/* int_fast64_t */
 
 #define	PRIoMAX			"jo"		/* intmax_t */
@@ -113,8 +150,8 @@
 #define	PRIuLEAST64		__PRI_64_prefix"u"		/* uint_least64_t */
 
 #define	PRIuFAST8		"u"		/* uint_fast8_t */
-#define	PRIuFAST16		"u"		/* uint_fast16_t */
-#define	PRIuFAST32		"u"		/* uint_fast32_t */
+#define	PRIuFAST16		__PRI_FAST_prefix"u"	/* uint_fast16_t */
+#define	PRIuFAST32		__PRI_FAST_prefix"u"	/* uint_fast32_t */
 #define	PRIuFAST64		__PRI_64_prefix"u"		/* uint_fast64_t */
 
 #define	PRIuMAX			"ju"		/* uintmax_t */
@@ -131,8 +168,8 @@
 #define	PRIxLEAST64		__PRI_64_prefix"x"		/* uint_least64_t */
 
 #define	PRIxFAST8		"x"		/* uint_fast8_t */
-#define	PRIxFAST16		"x"		/* uint_fast16_t */
-#define	PRIxFAST32		"x"		/* uint_fast32_t */
+#define	PRIxFAST16		__PRI_FAST_prefix"x"	/* uint_fast16_t */
+#define	PRIxFAST32		__PRI_FAST_prefix"x"	/* uint_fast32_t */
 #define	PRIxFAST64		__PRI_64_prefix"x"		/* uint_fast64_t */
 
 #define	PRIxMAX			"jx"		/* uintmax_t */
@@ -149,8 +186,8 @@
 #define	PRIXLEAST64		__PRI_64_prefix"X"		/* uint_least64_t */
 
 #define	PRIXFAST8		"X"		/* uint_fast8_t */
-#define	PRIXFAST16		"X"		/* uint_fast16_t */
-#define	PRIXFAST32		"X"		/* uint_fast32_t */
+#define	PRIXFAST16		__PRI_FAST_prefix"X"	/* uint_fast16_t */
+#define	PRIXFAST32		__PRI_FAST_prefix"X"	/* uint_fast32_t */
 #define	PRIXFAST64		__PRI_64_prefix"X"		/* uint_fast64_t */
 
 #define	PRIXMAX			"jX"		/* uintmax_t */
@@ -168,8 +205,8 @@
 #define	SCNdLEAST64		__PRI_64_prefix"d"		/* int_least64_t */
 
 #define	SCNdFAST8		"hhd"		/* int_fast8_t */
-#define	SCNdFAST16		"hd"		/* int_fast16_t */
-#define	SCNdFAST32		"d"		/* int_fast32_t */
+#define	SCNdFAST16		__PRI_FAST_prefix"d"	/* int_fast16_t */
+#define	SCNdFAST32		__PRI_FAST_prefix"d"	/* int_fast32_t */
 #define	SCNdFAST64		__PRI_64_prefix"d"		/* int_fast64_t */
 
 #define	SCNdMAX			"jd"		/* intmax_t */
@@ -186,14 +223,50 @@
 #define	SCNiLEAST64		__PRI_64_prefix"i"		/* int_least64_t */
 
 #define	SCNiFAST8		"hhi"		/* int_fast8_t */
-#define	SCNiFAST16		"hi"		/* int_fast16_t */
-#define	SCNiFAST32		"i"		/* int_fast32_t */
+#define	SCNiFAST16		__PRI_FAST_prefix"i"	/* int_fast16_t */
+#define	SCNiFAST32		__PRI_FAST_prefix"i"	/* int_fast32_t */
 #define	SCNiFAST64		__PRI_64_prefix"i"		/* int_fast64_t */
 
 #define	SCNiMAX			"ji"		/* intmax_t */
 #define	SCNiPTR			__PRI_PTR_prefix"i"		/* intptr_t */
 
 /* fscanf macros for unsigned integers */
+#define	SCNb8			"hhb"		/* uint8_t */
+#define	SCNb16			"hb"		/* uint16_t */
+#define	SCNb32			"b"		/* uint32_t */
+#define	SCNb64			__PRI_64_prefix"b"		/* uint64_t */
+
+#define	SCNbLEAST8		"hhb"		/* uint_least8_t */
+#define	SCNbLEAST16		"hb"		/* uint_least16_t */
+#define	SCNbLEAST32		"b"		/* uint_least32_t */
+#define	SCNbLEAST64		__PRI_64_prefix"b"		/* uint_least64_t */
+
+#define	SCNbFAST8		"hhb"		/* uint_fast8_t */
+#define	SCNbFAST16		__PRI_FAST_prefix"b"	/* uint_fast16_t */
+#define	SCNbFAST32		__PRI_FAST_prefix"b"	/* uint_fast32_t */
+#define	SCNbFAST64		__PRI_64_prefix"b"		/* uint_fast64_t */
+
+#define	SCNbMAX			"jb"		/* uintmax_t */
+#define	SCNbPTR			__PRI_PTR_prefix"b"		/* uintptr_t */
+
+#define	SCNB8			"hhB"		/* uint8_t */
+#define	SCNB16			"hB"		/* uint16_t */
+#define	SCNB32			"B"		/* uint32_t */
+#define	SCNB64			__PRI_64_prefix"B"		/* uint64_t */
+
+#define	SCNBLEAST8		"hhB"		/* uint_least8_t */
+#define	SCNBLEAST16		"hB"		/* uint_least16_t */
+#define	SCNBLEAST32		"B"		/* uint_least32_t */
+#define	SCNBLEAST64		__PRI_64_prefix"B"		/* uint_least64_t */
+
+#define	SCNBFAST8		"hhB"		/* uint_fast8_t */
+#define	SCNBFAST16		__PRI_FAST_prefix"B"	/* uint_fast16_t */
+#define	SCNBFAST32		__PRI_FAST_prefix"B"	/* uint_fast32_t */
+#define	SCNBFAST64		__PRI_64_prefix"B"		/* uint_fast64_t */
+
+#define	SCNBMAX			"jB"		/* uintmax_t */
+#define	SCNBPTR			__PRI_PTR_prefix"B"		/* uintptr_t */
+
 #define	SCNo8			"hho"		/* uint8_t */
 #define	SCNo16			"ho"		/* uint16_t */
 #define	SCNo32			"o"		/* uint32_t */
@@ -205,8 +278,8 @@
 #define	SCNoLEAST64		__PRI_64_prefix"o"		/* uint_least64_t */
 
 #define	SCNoFAST8		"hho"		/* uint_fast8_t */
-#define	SCNoFAST16		"ho"		/* uint_fast16_t */
-#define	SCNoFAST32		"o"		/* uint_fast32_t */
+#define	SCNoFAST16		__PRI_FAST_prefix"o"	/* uint_fast16_t */
+#define	SCNoFAST32		__PRI_FAST_prefix"o"	/* uint_fast32_t */
 #define	SCNoFAST64		__PRI_64_prefix"o"		/* uint_fast64_t */
 
 #define	SCNoMAX			"jo"		/* uintmax_t */
@@ -223,8 +296,8 @@
 #define	SCNuLEAST64		__PRI_64_prefix"u"		/* uint_least64_t */
 
 #define	SCNuFAST8		"hhu"		/* uint_fast8_t */
-#define	SCNuFAST16		"hu"		/* uint_fast16_t */
-#define	SCNuFAST32		"u"		/* uint_fast32_t */
+#define	SCNuFAST16		__PRI_FAST_prefix"u"	/* uint_fast16_t */
+#define	SCNuFAST32		__PRI_FAST_prefix"u"		/* uint_fast32_t */
 #define	SCNuFAST64		__PRI_64_prefix"u"		/* uint_fast64_t */
 
 #define	SCNuMAX			"ju"		/* uintmax_t */
@@ -241,8 +314,8 @@
 #define	SCNxLEAST64		__PRI_64_prefix"x"		/* uint_least64_t */
 
 #define	SCNxFAST8		"hhx"		/* uint_fast8_t */
-#define	SCNxFAST16		"hx"		/* uint_fast16_t */
-#define	SCNxFAST32		"x"		/* uint_fast32_t */
+#define	SCNxFAST16		__PRI_FAST_prefix"x"	/* uint_fast16_t */
+#define	SCNxFAST32		__PRI_FAST_prefix"x"	/* uint_fast32_t */
 #define	SCNxFAST64		__PRI_64_prefix"x"		/* uint_fast64_t */
 
 #define	SCNxMAX			"jx"		/* uintmax_t */
@@ -254,14 +327,12 @@ typedef struct {
 } imaxdiv_t;
 
 __BEGIN_DECLS
-intmax_t	imaxabs(intmax_t) __pure2;
-imaxdiv_t	imaxdiv(intmax_t, intmax_t) __pure2;
-intmax_t	strtoimax(const char *, char **, int);
-uintmax_t	strtoumax(const char *, char **, int);
-intmax_t	wcstoimax(const wchar_t * __restrict,
-		    wchar_t ** __restrict, int);
-uintmax_t	wcstoumax(const wchar_t * __restrict,
-		    wchar_t ** __restrict, int);
+intmax_t imaxabs(intmax_t __i) __attribute_const__;
+imaxdiv_t imaxdiv(intmax_t __numerator, intmax_t __denominator) __attribute_const__;
+intmax_t strtoimax(const char* _Nonnull __s, char* _Nullable * _Nullable __end_ptr, int __base);
+uintmax_t strtoumax(const char* _Nonnull __s, char* _Nullable * _Nullable __end_ptr, int __base);
+intmax_t wcstoimax(const wchar_t* _Nonnull __s, wchar_t* _Nullable * _Nullable __end_ptr, int __base);
+uintmax_t wcstoumax(const wchar_t* _Nonnull __s, wchar_t* _Nullable * _Nullable __end_ptr, int __base);
 __END_DECLS
 
-#endif /* _INTTYPES_H_ */
+#endif

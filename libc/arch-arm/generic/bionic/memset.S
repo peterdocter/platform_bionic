@@ -27,7 +27,6 @@
  */
 
 #include <private/bionic_asm.h>
-#include <private/libc_events.h>
 
         /*
          * Optimized memset() for ARM.
@@ -37,31 +36,14 @@
 
          .syntax unified
 
-ENTRY(__memset_chk)
+ENTRY(__memset_chk_generic)
         cmp         r2, r3
-        bls         done
+        bls         memset
 
-        ldr         r0, error_message
-        ldr         r1, error_code
-1:
-        add         r0, pc
-        bl          __fortify_chk_fail
-error_code:
-        .word       BIONIC_EVENT_MEMSET_BUFFER_OVERFLOW
-error_message:
-        .word       error_string-(1b+8)
+        bl          __memset_chk_fail
+END(__memset_chk_generic)
 
-END(__memset_chk)
-
-ENTRY(bzero)
-        mov     r2, r1
-        mov     r1, #0
-
-done:
-        // Fall through to memset...
-END(bzero)
-
-ENTRY(memset)
+ENTRY(memset_generic)
         /* compute the offset to align the destination
          * offset = (4-(src&3))&3 = -src & 3
          */
@@ -126,8 +108,4 @@ ENTRY(memset)
         movs        r2, r2, lsl #2
         strbcs      r1, [r0]
         ldmfd       sp!, {r0, r4-r7, pc}
-END(memset)
-
-        .data
-error_string:
-        .string     "memset: prevented write past end of buffer"
+END(memset_generic)

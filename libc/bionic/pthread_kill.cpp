@@ -29,18 +29,18 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include "private/bionic_defs.h"
 #include "private/ErrnoRestorer.h"
 #include "pthread_internal.h"
 
-extern "C" int tgkill(int tgid, int tid, int sig);
-
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int pthread_kill(pthread_t t, int sig) {
   ErrnoRestorer errno_restorer;
 
-  pthread_internal_t* thread = __pthread_internal_find(t);
-  if (thread == NULL) {
-    return ESRCH;
-  }
+  pid_t tid = __pthread_internal_gettid(t, "pthread_kill");
 
-  return (tgkill(getpid(), thread->tid, sig) == -1) ? errno : 0;
+  // tid gets reset to 0 on thread exit by CLONE_CHILD_CLEARTID.
+  if (tid == 0 || tid == -1) return ESRCH;
+
+  return (tgkill(getpid(), tid, sig) == -1) ? errno : 0;
 }

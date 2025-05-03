@@ -1,4 +1,3 @@
-/* From: @(#)e_rem_pio2.c 1.4 95/01/18 */
 /*
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -12,9 +11,6 @@
  *
  * Optimized by Bruce D. Evans.
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 /* ld128 version of __ieee754_rem_pio2l(x,y)
  * 
@@ -58,7 +54,7 @@ pio2_2t =  2.0670321098263988236496903051604844e-43L,	/*  0x127044533e63a0105df5
 pio2_3  =  2.0670321098263988236499468110329591e-43L,	/*  0x127044533e63a0105e00000000000.0p-254 */
 pio2_3t = -2.5650587247459238361625433492959285e-65L;	/* -0x159c4ec64ddaeb5f78671cbfb2210.0p-327 */
 
-static inline __always_inline int
+static __always_inline int
 __ieee754_rem_pio2l(long double x, long double *y)
 {
 	union IEEEl2bits u,u1;
@@ -74,14 +70,9 @@ __ieee754_rem_pio2l(long double x, long double *y)
 	if (ex < BIAS + 45 || ex == BIAS + 45 &&
 	    u.bits.manh < 0x921fb54442d1LL) {
 	    /* |x| ~< 2^45*(pi/2), medium size */
-	    /* Use a specialized rint() to get fn.  Assume round-to-nearest. */
-	    fn = x*invpio2+0x1.8p112;
-	    fn = fn-0x1.8p112;
-#ifdef HAVE_EFFICIENT_I64RINT
+	    /* TODO: use only double precision for fn, as in expl(). */
+	    fn = rnintl(x * invpio2);
 	    n  = i64rint(fn);
-#else
-	    n  = fn;
-#endif
 	    r  = x-fn*pio2_1;
 	    w  = fn*pio2_1t;	/* 1st round good to 180 bit */
 	    {

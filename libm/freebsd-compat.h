@@ -14,10 +14,14 @@
  * limitations under the License.
  */
 
-#ifndef _BIONIC_LIBM_FREEBSD_COMPAT_H_included
-#define _BIONIC_LIBM_FREEBSD_COMPAT_H_included
+#pragma once
 
-#include <float.h>
+// Since we're implementing all the extensions,
+// we need to make sure we get all their declarations when we include <math.h>.
+#define _BSD_SOURCE
+
+// Some FreeBSD source includes <complex.h> and assumes <math.h> from that.
+#include <math.h>
 
 #define __weak_reference(sym,alias)     \
     __asm__(".weak " #alias);           \
@@ -26,9 +30,13 @@
 #define __strong_reference(sym,aliassym) \
     extern __typeof (sym) aliassym __attribute__ ((__alias__ (#sym)))
 
-#define __warn_references(sym,msg) /* ignored */
+// digittoint is in BSD's <ctype.h> but not ours.
+#include <ctype.h>
+static inline int digittoint(char ch) {
+  if (!isxdigit(ch)) return -1;
+  return isdigit(ch) ? (ch - '0') : (_tolower(ch) - 'a');
+}
 
-/* digittoint is in BSD's <ctype.h>. */
-int digittoint(char ch);
-
-#endif
+// FreeBSD exports these in <math.h> but we don't.
+double cospi(double);
+double sinpi(double);

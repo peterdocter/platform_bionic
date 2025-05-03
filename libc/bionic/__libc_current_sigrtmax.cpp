@@ -28,6 +28,6 @@
 
 #include <signal.h>
 
-int __libc_current_sigrtmax(void) {
+int __libc_current_sigrtmax() {
   return __SIGRTMAX;
 }

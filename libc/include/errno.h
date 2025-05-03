@@ -25,31 +25,36 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef _ERRNO_H
-#define _ERRNO_H
+
+#pragma once
+
+/**
+ * @file errno.h
+ * @brief Standard C error handling.
+ */
 
 #include <sys/cdefs.h>
 #include <linux/errno.h>
 
 __BEGIN_DECLS
 
-/* on Linux, ENOTSUP and EOPNOTSUPP are defined as the same error code
- * even if 1000.3 states that they should be different
+#ifndef ENOTSUP
+/** On Linux, ENOTSUP and EOPNOTSUPP are the same despite POSIX saying they should be distinct. */
+#define ENOTSUP EOPNOTSUPP
+#endif
+
+/**
+ * Returns the address of the calling thread's `errno` storage.
+ * Non-portable and should not be used directly. Use `errno` instead.
+ *
+ * @private
  */
-#ifndef  ENOTSUP
-#define  ENOTSUP  EOPNOTSUPP
-#endif
+int* _Nonnull __errno(void) __attribute_const__;
 
-/* internal function returning the address of the thread-specific errno */
-extern volatile int* __errno(void) __pure2;
-
-/* a macro expanding to the errno l-value */
-#define  errno   (*__errno())
-
-#if __ANDROID_API__ < 21
-#include <android/legacy_errno_inlines.h>
-#endif
+/**
+ * [errno(3)](https://man7.org/linux/man-pages/man3/errno.3.html) is the last error on the calling
+ * thread.
+ */
+#define errno (*__errno())
 
 __END_DECLS
-
-#endif /* _ERRNO_H */

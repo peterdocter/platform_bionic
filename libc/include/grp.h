@@ -1,9 +1,6 @@
-/*	$OpenBSD: grp.h,v 1.8 2005/12/13 00:35:22 millert Exp $	*/
-/*	$NetBSD: grp.h,v 1.7 1995/04/29 05:30:40 cgd Exp $	*/
-
 /*-
  * Copyright (c) 1989, 1993
- *	The Regents of the University of California.  All rights reserved.
+ *    The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
  * All or some portions of this file are derived from material licensed
  * to the University of California by American Telephone and Telegraph
@@ -33,41 +30,44 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)grp.h	8.2 (Berkeley) 1/21/94
  */
 
 #ifndef _GRP_H_
-#define	_GRP_H_
+#define _GRP_H_
 
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
 struct group {
-	char	*gr_name;		/* group name */
-	char	*gr_passwd;		/* group password */
-	gid_t	gr_gid;			/* group id */
-	char	**gr_mem;		/* group members */
+  char* _Nullable gr_name; /* group name */
+  char* _Nullable gr_passwd; /* group password */
+  gid_t gr_gid; /* group id */
+  char* _Nullable * _Nullable gr_mem; /* group members */
 };
 
 __BEGIN_DECLS
-struct group	*getgrgid(gid_t);
-struct group	*getgrnam(const char *);
-#if __POSIX_VISIBLE >= 200112 || __XPG_VISIBLE
-struct group	*getgrent(void)  __attribute__((deprecated("getgrent is meaningless on Android")));
-void setgrent(void) __attribute__((deprecated("setgrent is meaningless on Android")));
-void endgrent(void) __attribute__((deprecated("endgrent is meaningless on Android")));
-int		 getgrgid_r(gid_t, struct group *, char *,
-		    size_t, struct group **);
-int		 getgrnam_r(const char *, struct group *, char *,
-		    size_t, struct group **);
-#endif
 
-int   getgrouplist (const char *user, gid_t group,
-                  gid_t *groups, int *ngroups);
+struct group* _Nullable getgrgid(gid_t __gid);
+struct group* _Nullable getgrnam(const char* _Nonnull __name);
 
-int   initgroups (const char *user, gid_t group);
+/* Note: Android has thousands and thousands of ids to iterate through. */
+
+#if __BIONIC_AVAILABILITY_GUARD(26)
+struct group* _Nullable getgrent(void) __INTRODUCED_IN(26);
+
+void setgrent(void) __INTRODUCED_IN(26);
+void endgrent(void) __INTRODUCED_IN(26);
+#endif /* __BIONIC_AVAILABILITY_GUARD(26) */
+
+
+#if __BIONIC_AVAILABILITY_GUARD(24)
+int getgrgid_r(gid_t __gid, struct group* __BIONIC_COMPLICATED_NULLNESS __group, char* _Nonnull __buf, size_t __n, struct group* _Nullable * _Nonnull __result) __INTRODUCED_IN(24);
+int getgrnam_r(const char* _Nonnull __name, struct group* __BIONIC_COMPLICATED_NULLNESS __group, char* _Nonnull __buf, size_t __n, struct group* _Nullable *_Nonnull __result) __INTRODUCED_IN(24);
+#endif /* __BIONIC_AVAILABILITY_GUARD(24) */
+
+int getgrouplist(const char* _Nonnull __user, gid_t __group, gid_t* __BIONIC_COMPLICATED_NULLNESS __groups, int* _Nonnull __group_count);
+int initgroups(const char* _Nonnull __user, gid_t __group);
 
 __END_DECLS
 
-#endif /* !_GRP_H_ */
+#endif

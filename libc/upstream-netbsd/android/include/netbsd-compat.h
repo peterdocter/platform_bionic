@@ -14,24 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef _BIONIC_NETBSD_COMPAT_H_included
-#define _BIONIC_NETBSD_COMPAT_H_included
+#pragma once
 
 #define _BSD_SOURCE
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 
-// NetBSD uses _DIAGASSERT to null-check arguments and the like.
-#include <assert.h>
-#define _DIAGASSERT(e) ((e) ? (void) 0 : __assert2(__FILE__, __LINE__, __func__, #e))
+// NetBSD uses _DIAGASSERT to null-check arguments and the like,
+// but it's clear from the number of mistakes in their assertions
+// that they don't actually test or ship with this.
+#define _DIAGASSERT(e) /* nothing */
 
-// TODO: update our <sys/cdefs.h> to support this properly.
-#define __type_fit(t, a) (0 == 0)
+/*
+ * The following macro is used to remove const cast-away warnings
+ * from gcc -Wcast-qual; it should be used with caution because it
+ * can hide valid errors; in particular most valid uses are in
+ * situations where the API requires it, not to cast away string
+ * constants. We don't use *intptr_t on purpose here and we are
+ * explicit about unsigned long so that we don't have additional
+ * dependencies.
+ */
+#define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
 
-// TODO: we don't yet have thread-safe environment variables.
-#define __readlockenv() 0
-#define __unlockenv() 0
-
-#include <stddef.h>
-int reallocarr(void*, size_t, size_t);
-
-#endif
+#define __arraycount(a) (sizeof(a) / sizeof(a[0]))

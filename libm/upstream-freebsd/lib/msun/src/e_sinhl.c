@@ -11,9 +11,6 @@
  * ====================================================
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 /*
  * See e_sinh.c for complete comments.
  *
@@ -85,7 +82,10 @@ long double
 sinhl(long double x)
 {
 	long double hi,lo,x2,x4;
-	double dx2,s;
+#if LDBL_MANT_DIG == 113
+	double dx2;
+#endif
+	double s;
 	int16_t ix,jx;
 
 	GET_LDBL_EXPSIGN(jx,x);

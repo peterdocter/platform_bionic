@@ -1,4 +1,4 @@
-/*	$OpenBSD: setvbuf.c,v 1.12 2015/01/13 07:18:21 guenther Exp $ */
+/*	$OpenBSD: setvbuf.c,v 1.15 2022/09/28 16:44:14 gnezdo Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -31,6 +31,7 @@
  * SUCH DAMAGE.
  */
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "local.h"
@@ -52,7 +53,7 @@ setvbuf(FILE *fp, char *buf, int mode, size_t size)
 	 * when setting _IONBF.
 	 */
 	if (mode != _IONBF)
-		if ((mode != _IOFBF && mode != _IOLBF) || (int)size < 0)
+		if ((mode != _IOFBF && mode != _IOLBF) || size > INT_MAX)
 			return (EOF);
 
 	/*
@@ -70,7 +71,7 @@ setvbuf(FILE *fp, char *buf, int mode, size_t size)
 	fp->_r = fp->_lbfsize = 0;
 	flags = fp->_flags;
 	if (flags & __SMBF)
-		free((void *)fp->_bf._base);
+		free(fp->_bf._base);
 	flags &= ~(__SLBF | __SNBF | __SMBF | __SOPT | __SNPT | __SEOF);
 
 	/* If setting unbuffered mode, skip all the hard work. */
@@ -131,7 +132,8 @@ nbf:
 		flags |= __SNPT;
 
 	/*
-	 * Fix up the FILE fields.
+	 * Fix up the FILE fields, and set __cleanup for output flush on
+	 * exit (since we are buffered in some way).
 	 */
 	if (mode == _IOLBF)
 		flags |= __SLBF;
@@ -157,3 +159,4 @@ nbf:
 
 	return (ret);
 }
+DEF_STRONG(setvbuf);

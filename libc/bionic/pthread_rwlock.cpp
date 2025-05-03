@@ -69,11 +69,12 @@
 #define RWLOCKATTR_KIND_MASK     2
 #define RWLOCKATTR_RESERVED_MASK (~3)
 
-static inline __always_inline __always_inline bool __rwlockattr_getpshared(const pthread_rwlockattr_t* attr) {
+static inline __always_inline bool __rwlockattr_getpshared(const pthread_rwlockattr_t* attr) {
   return (*attr & RWLOCKATTR_PSHARED_MASK) >> RWLOCKATTR_PSHARED_SHIFT;
 }
 
-static inline __always_inline __always_inline void __rwlockattr_setpshared(pthread_rwlockattr_t* attr, int pshared) {
+static inline __always_inline void __rwlockattr_setpshared(pthread_rwlockattr_t* attr,
+                                                           int pshared) {
   *attr = (*attr & ~RWLOCKATTR_PSHARED_MASK) | (pshared << RWLOCKATTR_PSHARED_SHIFT);
 }
 
@@ -228,7 +229,7 @@ int pthread_rwlock_init(pthread_rwlock_t* rwlock_interface, const pthread_rwlock
 
   memset(rwlock, 0, sizeof(pthread_rwlock_internal_t));
 
-  if (__predict_false(attr != NULL)) {
+  if (__predict_false(attr != nullptr)) {
     rwlock->pshared = __rwlockattr_getpshared(attr);
     int kind = __rwlockattr_getkind(attr);
     switch (kind) {
@@ -246,7 +247,7 @@ int pthread_rwlock_init(pthread_rwlock_t* rwlock_interface, const pthread_rwlock
     }
   }
 
-  atomic_init(&rwlock->state, 0);
+  atomic_store_explicit(&rwlock->state, 0, memory_order_relaxed);
   rwlock->pending_lock.init(rwlock->pshared);
   return 0;
 }
@@ -286,32 +287,25 @@ static inline __always_inline int __pthread_rwlock_tryrdlock(pthread_rwlock_inte
   return EBUSY;
 }
 
-static int __pthread_rwlock_timedrdlock(pthread_rwlock_internal_t* rwlock,
+static int __pthread_rwlock_timedrdlock(pthread_rwlock_internal_t* rwlock, bool use_realtime_clock,
                                         const timespec* abs_timeout_or_null) {
-
   if (atomic_load_explicit(&rwlock->writer_tid, memory_order_relaxed) == __get_thread()->tid) {
     return EDEADLK;
   }
 
   while (true) {
-    int ret = __pthread_rwlock_tryrdlock(rwlock);
-    if (ret == 0 || ret == EAGAIN) {
-      return ret;
+    int result = __pthread_rwlock_tryrdlock(rwlock);
+    if (result == 0 || result == EAGAIN) {
+      return result;
+    }
+    result = check_timespec(abs_timeout_or_null, true);
+    if (result != 0) {
+      return result;
     }
 
     int old_state = atomic_load_explicit(&rwlock->state, memory_order_relaxed);
     if (__can_acquire_read_lock(old_state, rwlock->writer_nonrecursive_preferred)) {
       continue;
-    }
-
-    timespec ts;
-    timespec* rel_timeout = NULL;
-
-    if (abs_timeout_or_null != NULL) {
-      rel_timeout = &ts;
-      if (!timespec_from_absolute_timespec(*rel_timeout, *abs_timeout_or_null, CLOCK_REALTIME)) {
-        return ETIMEDOUT;
-      }
     }
 
     rwlock->pending_lock.lock();
@@ -327,10 +321,10 @@ static int __pthread_rwlock_timedrdlock(pthread_rwlock_internal_t* rwlock,
     int old_serial = rwlock->pending_reader_wakeup_serial;
     rwlock->pending_lock.unlock();
 
-    int futex_ret = 0;
+    int futex_result = 0;
     if (!__can_acquire_read_lock(old_state, rwlock->writer_nonrecursive_preferred)) {
-      futex_ret = __futex_wait_ex(&rwlock->pending_reader_wakeup_serial, rwlock->pshared,
-                                  old_serial, rel_timeout);
+      futex_result = __futex_wait_ex(&rwlock->pending_reader_wakeup_serial, rwlock->pshared,
+                                     old_serial, use_realtime_clock, abs_timeout_or_null);
     }
 
     rwlock->pending_lock.lock();
@@ -341,7 +335,7 @@ static int __pthread_rwlock_timedrdlock(pthread_rwlock_internal_t* rwlock,
     }
     rwlock->pending_lock.unlock();
 
-    if (futex_ret == -ETIMEDOUT) {
+    if (futex_result == -ETIMEDOUT) {
       return ETIMEDOUT;
     }
   }
@@ -365,31 +359,24 @@ static inline __always_inline int __pthread_rwlock_trywrlock(pthread_rwlock_inte
   return EBUSY;
 }
 
-static int __pthread_rwlock_timedwrlock(pthread_rwlock_internal_t* rwlock,
+static int __pthread_rwlock_timedwrlock(pthread_rwlock_internal_t* rwlock, bool use_realtime_clock,
                                         const timespec* abs_timeout_or_null) {
-
   if (atomic_load_explicit(&rwlock->writer_tid, memory_order_relaxed) == __get_thread()->tid) {
     return EDEADLK;
   }
   while (true) {
-    int ret = __pthread_rwlock_trywrlock(rwlock);
-    if (ret == 0) {
-      return ret;
+    int result = __pthread_rwlock_trywrlock(rwlock);
+    if (result == 0) {
+      return result;
+    }
+    result = check_timespec(abs_timeout_or_null, true);
+    if (result != 0) {
+      return result;
     }
 
     int old_state = atomic_load_explicit(&rwlock->state, memory_order_relaxed);
     if (__can_acquire_write_lock(old_state)) {
       continue;
-    }
-
-    timespec ts;
-    timespec* rel_timeout = NULL;
-
-    if (abs_timeout_or_null != NULL) {
-      rel_timeout = &ts;
-      if (!timespec_from_absolute_timespec(*rel_timeout, *abs_timeout_or_null, CLOCK_REALTIME)) {
-        return ETIMEDOUT;
-      }
     }
 
     rwlock->pending_lock.lock();
@@ -401,10 +388,10 @@ static int __pthread_rwlock_timedwrlock(pthread_rwlock_internal_t* rwlock,
     int old_serial = rwlock->pending_writer_wakeup_serial;
     rwlock->pending_lock.unlock();
 
-    int futex_ret = 0;
+    int futex_result = 0;
     if (!__can_acquire_write_lock(old_state)) {
-      futex_ret = __futex_wait_ex(&rwlock->pending_writer_wakeup_serial, rwlock->pshared,
-                                  old_serial, rel_timeout);
+      futex_result = __futex_wait_ex(&rwlock->pending_writer_wakeup_serial, rwlock->pshared,
+                                     old_serial, use_realtime_clock, abs_timeout_or_null);
     }
 
     rwlock->pending_lock.lock();
@@ -415,7 +402,7 @@ static int __pthread_rwlock_timedwrlock(pthread_rwlock_internal_t* rwlock,
     }
     rwlock->pending_lock.unlock();
 
-    if (futex_ret == -ETIMEDOUT) {
+    if (futex_result == -ETIMEDOUT) {
       return ETIMEDOUT;
     }
   }
@@ -427,13 +414,32 @@ int pthread_rwlock_rdlock(pthread_rwlock_t* rwlock_interface) {
   if (__predict_true(__pthread_rwlock_tryrdlock(rwlock) == 0)) {
     return 0;
   }
-  return __pthread_rwlock_timedrdlock(rwlock, NULL);
+  return __pthread_rwlock_timedrdlock(rwlock, false, nullptr);
 }
 
 int pthread_rwlock_timedrdlock(pthread_rwlock_t* rwlock_interface, const timespec* abs_timeout) {
   pthread_rwlock_internal_t* rwlock = __get_internal_rwlock(rwlock_interface);
 
-  return __pthread_rwlock_timedrdlock(rwlock, abs_timeout);
+  return __pthread_rwlock_timedrdlock(rwlock, true, abs_timeout);
+}
+
+int pthread_rwlock_timedrdlock_monotonic_np(pthread_rwlock_t* rwlock_interface,
+                                            const timespec* abs_timeout) {
+  pthread_rwlock_internal_t* rwlock = __get_internal_rwlock(rwlock_interface);
+
+  return __pthread_rwlock_timedrdlock(rwlock, false, abs_timeout);
+}
+
+int pthread_rwlock_clockrdlock(pthread_rwlock_t* rwlock_interface, clockid_t clock,
+                               const struct timespec* abs_timeout) {
+  switch (clock) {
+    case CLOCK_MONOTONIC:
+      return pthread_rwlock_timedrdlock_monotonic_np(rwlock_interface, abs_timeout);
+    case CLOCK_REALTIME:
+      return pthread_rwlock_timedrdlock(rwlock_interface, abs_timeout);
+    default:
+      return EINVAL;
+  }
 }
 
 int pthread_rwlock_tryrdlock(pthread_rwlock_t* rwlock_interface) {
@@ -446,13 +452,32 @@ int pthread_rwlock_wrlock(pthread_rwlock_t* rwlock_interface) {
   if (__predict_true(__pthread_rwlock_trywrlock(rwlock) == 0)) {
     return 0;
   }
-  return __pthread_rwlock_timedwrlock(rwlock, NULL);
+  return __pthread_rwlock_timedwrlock(rwlock, false, nullptr);
 }
 
 int pthread_rwlock_timedwrlock(pthread_rwlock_t* rwlock_interface, const timespec* abs_timeout) {
   pthread_rwlock_internal_t* rwlock = __get_internal_rwlock(rwlock_interface);
 
-  return __pthread_rwlock_timedwrlock(rwlock, abs_timeout);
+  return __pthread_rwlock_timedwrlock(rwlock, true, abs_timeout);
+}
+
+int pthread_rwlock_timedwrlock_monotonic_np(pthread_rwlock_t* rwlock_interface,
+                                            const timespec* abs_timeout) {
+  pthread_rwlock_internal_t* rwlock = __get_internal_rwlock(rwlock_interface);
+
+  return __pthread_rwlock_timedwrlock(rwlock, false, abs_timeout);
+}
+
+int pthread_rwlock_clockwrlock(pthread_rwlock_t* rwlock_interface, clockid_t clock,
+                               const struct timespec* abs_timeout) {
+  switch (clock) {
+    case CLOCK_MONOTONIC:
+      return pthread_rwlock_timedwrlock_monotonic_np(rwlock_interface, abs_timeout);
+    case CLOCK_REALTIME:
+      return pthread_rwlock_timedwrlock(rwlock_interface, abs_timeout);
+    default:
+      return EINVAL;
+  }
 }
 
 int pthread_rwlock_trywrlock(pthread_rwlock_t* rwlock_interface) {

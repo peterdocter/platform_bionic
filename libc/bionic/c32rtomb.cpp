@@ -34,11 +34,11 @@
 
 size_t c32rtomb(char* s, char32_t c32, mbstate_t* ps) {
   static mbstate_t __private_state;
-  mbstate_t* state = (ps == NULL) ? &__private_state : ps;
+  mbstate_t* state = (ps == nullptr) ? &__private_state : ps;
 
-  if (s == NULL) {
+  if (s == nullptr) {
     // Equivalent to c32rtomb(buf, U'\0', ps).
-    return reset_and_return(1, state);
+    return mbstate_reset_and_return(1, state);
   }
 
   // POSIX states that if char32_t is a null wide character, a null byte shall
@@ -47,11 +47,11 @@ size_t c32rtomb(char* s, char32_t c32, mbstate_t* ps) {
   // stored.
   if (c32 == U'\0') {
     *s = '\0';
-    reset_and_return(1, state);
+    return mbstate_reset_and_return(1, state);
   }
 
-  if (!mbsinit(state)) {
-    return reset_and_return_illegal(EILSEQ, state);
+  if (!mbstate_is_initial(state)) {
+    return mbstate_reset_and_return_illegal(EILSEQ, state);
   }
 
   if ((c32 & ~0x7f) == 0) {
@@ -66,10 +66,8 @@ size_t c32rtomb(char* s, char32_t c32, mbstate_t* ps) {
   // about the sequence length.
   uint8_t lead;
   size_t length;
-  if ((c32 & ~0x7f) == 0) {
-    lead = 0;
-    length = 1;
-  } else if ((c32 & ~0x7ff) == 0) {
+  // We already handled the 1-byte case above, so we go straight to 2-bytes...
+  if ((c32 & ~0x7ff) == 0) {
     lead = 0xc0;
     length = 2;
   } else if ((c32 & ~0xffff) == 0) {
@@ -80,7 +78,7 @@ size_t c32rtomb(char* s, char32_t c32, mbstate_t* ps) {
     length = 4;
   } else {
     errno = EILSEQ;
-    return __MB_ERR_ILLEGAL_SEQUENCE;
+    return BIONIC_MULTIBYTE_RESULT_ILLEGAL_SEQUENCE;
   }
 
   // Output the octets representing the character in chunks

@@ -14,17 +14,16 @@
  * limitations under the License.
  */
 
+#define _GNU_SOURCE
 #include <float.h>
 #include <math.h>
 
-#ifndef __LP64__
-/*
- * The BSD "long double" functions are broken when sizeof(long double) == sizeof(double).
- * Android works around those cases by replacing the broken functions with our own trivial stubs
- * that call the regular "double" function.
- */
+#if !defined(__LP64__)
 
-long double copysignl(long double a1, long double a2) { return copysign(a1, a2); }
+// The BSD "long double" functions are broken when sizeof(long double) == sizeof(double).
+// Android works around those cases by replacing the broken functions with our own trivial stubs
+// that call the regular "double" function.
+
 long double fmaxl(long double a1, long double a2) { return fmax(a1, a2); }
 long double fmodl(long double a1, long double a2) { return fmod(a1, a2); }
 long double fminl(long double a1, long double a2) { return fmin(a1, a2); }
@@ -36,5 +35,9 @@ long lroundl(long double a1) { return lround(a1); }
 long double modfl(long double a1, long double* a2) { double i; double f = modf(a1, &i); *a2 = i; return f; }
 float nexttowardf(float a1, long double a2) { return nextafterf(a1, (float) a2); }
 long double roundl(long double a1) { return round(a1); }
+void sincosl(long double x, long double* s, long double* c) { sincos(x, (double*) s, (double*) c); }
 
 #endif // __LP64__
+
+// FreeBSD doesn't have an ld128 implementation of tgammal, so both LP32 and LP64 need this.
+long double tgammal(long double x) { return tgamma(x); }

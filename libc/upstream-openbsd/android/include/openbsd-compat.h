@@ -14,73 +14,42 @@
  * limitations under the License.
  */
 
-#ifndef _BIONIC_OPENBSD_COMPAT_H_included
-#define _BIONIC_OPENBSD_COMPAT_H_included
+#pragma once
 
 #define _BSD_SOURCE
-
 #include <sys/cdefs.h>
+
+#include <unistd.h> // For environ.
+
 #include <stddef.h> // For size_t.
 
-/* Redirect internal C library calls to the public function. */
-#define _err err
-#define _errx errx
-#define _verr verr
-#define _verrx verrx
-#define _vwarn vwarn
-#define _vwarnx vwarnx
-#define _warn warn
-#define _warnx warnx
+#include <sys/random.h> // For getentropy.
 
-/* Ignore all __weak_alias in OpenBSD. */
-#define __weak_alias(alias,sym)
+#define __BEGIN_HIDDEN_DECLS _Pragma("GCC visibility push(hidden)")
+#define __END_HIDDEN_DECLS _Pragma("GCC visibility pop")
+
+extern const char* __progname;
+
+/* Ignore all DEF_STRONG/DEF_WEAK in OpenBSD. */
+#define DEF_STRONG(sym)
+#define DEF_WEAK(sym)
+#define __weak_alias __strong_alias
 
 /* Ignore all __warn_references in OpenBSD. */
 #define __warn_references(sym,msg)
 
-/* OpenBSD's <ctype.h> uses these names, which conflicted with stlport.
- * Additionally, we changed the numeric/digit type from N to D for libcxx.
- */
-#define _U _CTYPE_U
-#define _L _CTYPE_L
-#define _N _CTYPE_D
-#define _S _CTYPE_S
-#define _P _CTYPE_P
-#define _C _CTYPE_C
-#define _X _CTYPE_X
-#define _B _CTYPE_B
+#define PROTO_NORMAL(x)
 
-/* OpenBSD has this, but we can't really implement it correctly on Linux. */
-#define issetugid() 0
-
-#define explicit_bzero(p, s) memset(p, 0, s)
-
-/* OpenBSD has these in <sys/param.h>, but "ALIGN" isn't something we want to reserve. */
-#define ALIGNBYTES (sizeof(uintptr_t) - 1)
-#define ALIGN(p) (((uintptr_t)(p) + ALIGNBYTES) &~ ALIGNBYTES)
-
-/* OpenBSD has this in paths.h. But this directory doesn't normally exist.
- * Even when it does exist, only the 'shell' user has permissions.
- */
-#define _PATH_TMP "/data/local/tmp/"
-
-/* We have OpenBSD's getentropy_linux.c, but we don't mention getentropy in any header. */
-__LIBC_HIDDEN__ extern int getentropy(void*, size_t);
-
-/* OpenBSD has this as API, but we just use it internally. */
-__LIBC_HIDDEN__ void* reallocarray(void*, size_t, size_t);
-
-/* LP32 NDK ctype.h contained references to these. */
-__LIBC64_HIDDEN__ extern const short* _tolower_tab_;
-__LIBC64_HIDDEN__ extern const short* _toupper_tab_;
-
-__LIBC_HIDDEN__ extern const char _C_ctype_[];
-__LIBC_HIDDEN__ extern const short _C_toupper_[];
-__LIBC_HIDDEN__ extern const short _C_tolower_[];
-__LIBC_HIDDEN__ extern char* __findenv(const char*, int, int*);
-__LIBC_HIDDEN__ extern char* _mktemp(char*);
-
-/* TODO: hide this when android_support.a is fixed (http://b/16298580).*/
-/*__LIBC_HIDDEN__*/ extern int __isthreaded;
-
+#if !defined(ANDROID_HOST_MUSL)
+#define explicit_bzero(p, s) memset_explicit(p, 0, s)
 #endif
+
+#if defined(ANDROID_HOST_MUSL)
+#define __LIBC_HIDDEN__ __attribute__((visibility("hidden")))
+#endif
+
+__LIBC_HIDDEN__ extern char* __findenv(const char*, int, int*);
+
+// Only OpenBSD has this at the moment, and we're more likely to just say
+// "malloc is always calloc", so we don't expose this as libc API.
+__LIBC_HIDDEN__ void* recallocarray(void*, size_t, size_t, size_t);

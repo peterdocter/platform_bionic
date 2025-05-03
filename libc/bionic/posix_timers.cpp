@@ -26,8 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#include "private/kernel_sigset_t.h"
-
 #include <errno.h>
 #include <malloc.h>
 #include <pthread.h>
@@ -36,8 +34,11 @@
 #include <string.h>
 #include <time.h>
 
+#include "private/bionic_lock.h"
+
 // System calls.
-extern "C" int __rt_sigtimedwait(const sigset_t*, siginfo_t*, const struct timespec*, size_t);
+extern "C" int __rt_sigprocmask(int, const sigset64_t*, sigset64_t*, size_t);
+extern "C" int __rt_sigtimedwait(const sigset64_t*, siginfo_t*, const timespec*, size_t);
 extern "C" int __timer_create(clockid_t, sigevent*, __kernel_timer_t*);
 extern "C" int __timer_delete(__kernel_timer_t);
 extern "C" int __timer_getoverrun(__kernel_timer_t);
@@ -61,6 +62,7 @@ struct PosixTimer {
   int sigev_notify;
 
   // The fields below are only needed for a SIGEV_THREAD timer.
+  Lock startup_handshake_lock;
   pthread_t callback_thread;
   void (*callback)(sigval_t);
   sigval_t callback_argument;
@@ -74,17 +76,25 @@ static __kernel_timer_t to_kernel_timer_id(timer_t timer) {
 static void* __timer_thread_start(void* arg) {
   PosixTimer* timer = reinterpret_cast<PosixTimer*>(arg);
 
-  kernel_sigset_t sigset;
-  sigaddset(sigset.get(), TIMER_SIGNAL);
+  // Check that our parent managed to create the kernel timer and bail if not...
+  timer->startup_handshake_lock.lock();
+  if (timer->kernel_timer_id == -1) {
+    free(timer);
+    return nullptr;
+  }
+
+  // Give ourselves a specific meaningful name now we have a kernel timer.
+  char name[16]; // 16 is the kernel-imposed limit.
+  snprintf(name, sizeof(name), "POSIX timer %d", to_kernel_timer_id(timer));
+  pthread_setname_np(timer->callback_thread, name);
+
+  sigset64_t sigset = {};
+  sigaddset64(&sigset, TIMER_SIGNAL);
 
   while (true) {
     // Wait for a signal...
-    siginfo_t si;
-    memset(&si, 0, sizeof(si));
-    int rc = __rt_sigtimedwait(sigset.get(), &si, NULL, sizeof(sigset));
-    if (rc == -1) {
-      continue;
-    }
+    siginfo_t si = {};
+    if (__rt_sigtimedwait(&sigset, &si, nullptr, sizeof(sigset)) == -1) continue;
 
     if (si.si_code == SI_TIMER) {
       // This signal was sent because a timer fired, so call the callback.
@@ -97,7 +107,7 @@ static void* __timer_thread_start(void* arg) {
     } else if (si.si_code == SI_TKILL) {
       // This signal was sent because someone wants us to exit.
       free(timer);
-      return NULL;
+      return nullptr;
     }
   }
 }
@@ -107,14 +117,15 @@ static void __timer_thread_stop(PosixTimer* timer) {
   pthread_kill(timer->callback_thread, TIMER_SIGNAL);
 }
 
-// http://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_create.html
+// https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/timer_create.html
 int timer_create(clockid_t clock_id, sigevent* evp, timer_t* timer_id) {
   PosixTimer* timer = reinterpret_cast<PosixTimer*>(malloc(sizeof(PosixTimer)));
-  if (timer == NULL) {
+  if (timer == nullptr) {
     return -1;
   }
 
-  timer->sigev_notify = (evp == NULL) ? SIGEV_SIGNAL : evp->sigev_notify;
+  timer->kernel_timer_id = -1;
+  timer->sigev_notify = (evp == nullptr) ? SIGEV_SIGNAL : evp->sigev_notify;
 
   // If not a SIGEV_THREAD timer, the kernel can handle it without our help.
   if (timer->sigev_notify != SIGEV_THREAD) {
@@ -130,10 +141,10 @@ int timer_create(clockid_t clock_id, sigevent* evp, timer_t* timer_id) {
   // Otherwise, this must be SIGEV_THREAD timer...
   timer->callback = evp->sigev_notify_function;
   timer->callback_argument = evp->sigev_value;
-  atomic_init(&timer->deleted, false);
+  atomic_store_explicit(&timer->deleted, false, memory_order_relaxed);
 
   // Check arguments that the kernel doesn't care about but we do.
-  if (timer->callback == NULL) {
+  if (timer->callback == nullptr) {
     free(timer);
     errno = EINVAL;
     return -1;
@@ -141,7 +152,7 @@ int timer_create(clockid_t clock_id, sigevent* evp, timer_t* timer_id) {
 
   // Create this timer's thread.
   pthread_attr_t thread_attributes;
-  if (evp->sigev_notify_attributes == NULL) {
+  if (evp->sigev_notify_attributes == nullptr) {
     pthread_attr_init(&thread_attributes);
   } else {
     thread_attributes = *reinterpret_cast<pthread_attr_t*>(evp->sigev_notify_attributes);
@@ -150,14 +161,20 @@ int timer_create(clockid_t clock_id, sigevent* evp, timer_t* timer_id) {
 
   // We start the thread with TIMER_SIGNAL blocked by blocking the signal here and letting it
   // inherit. If it tried to block the signal itself, there would be a race.
-  kernel_sigset_t sigset;
-  sigaddset(sigset.get(), TIMER_SIGNAL);
-  kernel_sigset_t old_sigset;
-  pthread_sigmask(SIG_BLOCK, sigset.get(), old_sigset.get());
+  sigset64_t sigset = {};
+  sigaddset64(&sigset, TIMER_SIGNAL);
+  sigset64_t old_sigset;
+
+  // Prevent the child thread from running until the timer has been created.
+  timer->startup_handshake_lock.init(false);
+  timer->startup_handshake_lock.lock();
+
+  // Use __rt_sigprocmask instead of sigprocmask64 to avoid filtering out TIMER_SIGNAL.
+  __rt_sigprocmask(SIG_BLOCK, &sigset, &old_sigset, sizeof(sigset));
 
   int rc = pthread_create(&timer->callback_thread, &thread_attributes, __timer_thread_start, timer);
 
-  pthread_sigmask(SIG_SETMASK, old_sigset.get(), NULL);
+  __rt_sigprocmask(SIG_SETMASK, &old_sigset, nullptr, sizeof(old_sigset));
 
   if (rc != 0) {
     free(timer);
@@ -165,26 +182,26 @@ int timer_create(clockid_t clock_id, sigevent* evp, timer_t* timer_id) {
     return -1;
   }
 
+  // Try to create the kernel timer.
   sigevent se = *evp;
   se.sigev_signo = TIMER_SIGNAL;
   se.sigev_notify = SIGEV_THREAD_ID;
   se.sigev_notify_thread_id = pthread_gettid_np(timer->callback_thread);
-  if (__timer_create(clock_id, &se, &timer->kernel_timer_id) == -1) {
-    __timer_thread_stop(timer);
+  rc = __timer_create(clock_id, &se, &timer->kernel_timer_id);
+
+  // Let the child run (whether we created the kernel timer or not).
+  timer->startup_handshake_lock.unlock();
+  // If __timer_create(2) failed, the child will kill itself and free the
+  // timer struct, so we just need to exit.
+  if (rc == -1) {
     return -1;
   }
-
-  // Give the thread a specific meaningful name.
-  // It can't do this itself because the kernel timer isn't created until after it's running.
-  char name[16]; // 16 is the kernel-imposed limit.
-  snprintf(name, sizeof(name), "POSIX timer %d", to_kernel_timer_id(timer));
-  pthread_setname_np(timer->callback_thread, name);
 
   *timer_id = timer;
   return 0;
 }
 
-// http://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_delete.html
+// https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/timer_delete.html
 int timer_delete(timer_t id) {
   int rc = __timer_delete(to_kernel_timer_id(id));
   if (rc == -1) {
@@ -203,12 +220,12 @@ int timer_delete(timer_t id) {
   return 0;
 }
 
-// http://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_gettime.html
+// https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/timer_gettime.html
 int timer_gettime(timer_t id, itimerspec* ts) {
   return __timer_gettime(to_kernel_timer_id(id), ts);
 }
 
-// http://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_settime.html
+// https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/timer_settime.html
 // When using timer_settime to disarm a repeatable SIGEV_THREAD timer with a very small
 // period (like below 1ms), the kernel may continue to send events to the callback thread
 // for a few extra times. This behavior is fine because in POSIX standard: The effect of
@@ -218,7 +235,7 @@ int timer_settime(timer_t id, int flags, const itimerspec* ts, itimerspec* ots) 
   return __timer_settime(timer->kernel_timer_id, flags, ts, ots);
 }
 
-// http://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_getoverrun.html
+// https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/timer_getoverrun.html
 int timer_getoverrun(timer_t id) {
   return __timer_getoverrun(to_kernel_timer_id(id));
 }

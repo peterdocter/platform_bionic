@@ -26,115 +26,217 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _FCNTL_H
+#pragma once
 #define _FCNTL_H
+
+/**
+ * @file fcntl.h
+ * @brief File control operations.
+ */
 
 #include <sys/cdefs.h>
 #include <sys/types.h>
 #include <linux/fadvise.h>
+#include <linux/falloc.h>
 #include <linux/fcntl.h>
 #include <linux/stat.h>
 #include <linux/uio.h>
 
+#include <bits/fcntl.h>
+#include <bits/seek_constants.h>
+
+#if defined(__USE_GNU) || defined(__USE_BSD)
+#include <bits/lockf.h>
+#endif
+
 __BEGIN_DECLS
 
-#ifdef __LP64__
+#if defined(__LP64__)
+
 /* LP64 kernels don't have F_*64 defines because their flock is 64-bit. */
+
+/** Flag for flock(). */
 #define F_GETLK64  F_GETLK
+/** Flag for flock(). */
 #define F_SETLK64  F_SETLK
+/** Flag for flock(). */
 #define F_SETLKW64 F_SETLKW
+
+#elif defined(__USE_FILE_OFFSET64)
+
+/* For _FILE_OFFSET_BITS=64, redirect the constants to the off64_t variants. */
+
+#undef F_GETLK
+#undef F_SETLK
+#undef F_SETLKW
+
+/** Flag for flock(). */
+#define F_GETLK F_GETLK64
+/** Flag for flock(). */
+#define F_SETLK F_SETLK64
+/** Flag for flock(). */
+#define F_SETLKW F_SETLKW64
+
 #endif
 
+/** Flag for open(). */
 #define O_ASYNC FASYNC
+/** Flag for open(). */
 #define O_RSYNC O_SYNC
 
+/** Flag for splice(). */
 #define SPLICE_F_MOVE 1
+/** Flag for splice(). */
 #define SPLICE_F_NONBLOCK 2
+/** Flag for splice(). */
 #define SPLICE_F_MORE 4
+/** Flag for splice(). */
 #define SPLICE_F_GIFT 8
 
+/** Flag for sync_file_range(). */
 #define SYNC_FILE_RANGE_WAIT_BEFORE 1
+/** Flag for sync_file_range(). */
 #define SYNC_FILE_RANGE_WRITE 2
+/** Flag for sync_file_range(). */
 #define SYNC_FILE_RANGE_WAIT_AFTER 4
 
-extern int creat(const char*, mode_t);
-extern int creat64(const char*, mode_t);
-extern int fcntl(int, int, ...);
-extern int openat(int, const char*, int, ...);
-extern int openat64(int, const char*, int, ...);
-extern int open(const char*, int, ...);
-extern int open64(const char*, int, ...);
-extern ssize_t splice(int, off64_t*, int, off64_t*, size_t, unsigned int);
-extern ssize_t tee(int, int, size_t, unsigned int);
-extern int unlinkat(int, const char*, int);
-extern ssize_t vmsplice(int, const struct iovec*, size_t, unsigned int);
+/**
+ * [creat(2)](https://man7.org/linux/man-pages/man2/creat.2.html)
+ * creates a file.
+ *
+ * Returns a new file descriptor on success and returns -1 and sets `errno` on
+ * failure.
+ */
+int creat(const char* _Nonnull __path, mode_t __mode);
+/** See creat(). */
+int creat64(const char* _Nonnull __path, mode_t __mode);
 
-#if defined(__USE_FILE_OFFSET64)
-extern int fallocate(int, int, off_t, off_t) __RENAME(fallocate64);
-extern int posix_fadvise(int, off_t, off_t, int) __RENAME(posix_fadvise64);
-extern int posix_fallocate(int, off_t, off_t) __RENAME(posix_fallocate);
-#else
-extern int fallocate(int, int, off_t, off_t);
-extern int posix_fadvise(int, off_t, off_t, int);
-extern int posix_fallocate(int, off_t, off_t);
+/**
+ * [openat(2)](https://man7.org/linux/man-pages/man2/openat.2.html)
+ * opens (and possibly creates) a file.
+ *
+ * Returns a new file descriptor on success and returns -1 and sets `errno` on
+ * failure.
+ */
+int openat(int __dir_fd, const char* _Nonnull __path, int __flags, ...);
+/** See openat(). */
+int openat64(int __dir_fd, const char* _Nonnull __path, int __flags, ...);
+
+/**
+ * [open(2)](https://man7.org/linux/man-pages/man2/open.2.html)
+ * opens (and possibly creates) a file.
+ *
+ * Returns a new file descriptor on success and returns -1 and sets `errno` on
+ * failure.
+ */
+int open(const char* _Nonnull __path, int __flags, ...);
+/** See open(). */
+int open64(const char* _Nonnull __path, int __flags, ...);
+
+/**
+ * [splice(2)](https://man7.org/linux/man-pages/man2/splice.2.html)
+ * splices data to/from a pipe.
+ *
+ * Valid flags are `SPLICE_F_MOVE`, `SPLICE_F_NONBLOCK`, `SPLICE_F_MORE`, and
+ * `SPLICE_F_GIFT`.
+ *
+ * Returns the number of bytes spliced on success and returns -1 and sets
+ * `errno` on failure.
+ */
+ssize_t splice(int __in_fd, off64_t* __BIONIC_COMPLICATED_NULLNESS __in_offset, int __out_fd, off64_t* __BIONIC_COMPLICATED_NULLNESS __out_offset, size_t __length, unsigned int __flags);
+
+/**
+ * [tee(2)](https://man7.org/linux/man-pages/man2/tee.2.html)
+ * duplicates data from one pipe to another.
+ *
+ * Valid flags are `SPLICE_F_MOVE`, `SPLICE_F_NONBLOCK`, `SPLICE_F_MORE`, and
+ * `SPLICE_F_GIFT`.
+ *
+ * Returns the number of bytes duplicated on success and returns -1 and sets
+ * `errno` on failure.
+ */
+ssize_t tee(int __in_fd, int __out_fd, size_t __length, unsigned int __flags);
+
+/**
+ * [vmsplice(2)](https://man7.org/linux/man-pages/man2/vmsplice.2.html)
+ * splices data to/from a pipe.
+ *
+ * Valid flags are `SPLICE_F_MOVE`, `SPLICE_F_NONBLOCK`, `SPLICE_F_MORE`, and
+ * `SPLICE_F_GIFT`.
+ *
+ * Returns the number of bytes spliced on success and returns -1 and sets
+ * `errno` on failure.
+ */
+ssize_t vmsplice(int __fd, const struct iovec* _Nonnull __iov, size_t __count, unsigned int __flags);
+
+/**
+ * [fallocate(2)](https://man7.org/linux/man-pages/man2/fallocate.2.html)
+ * is a Linux-specific extension of posix_fallocate().
+ *
+ * Valid flags are `FALLOC_FL_KEEP_SIZE`, `FALLOC_FL_PUNCH_HOLE`,
+ * `FALLOC_FL_NO_HIDE_STALE`, `FALLOC_FL_COLLAPSE_RANGE`,
+ * `FALLOC_FL_ZERO_RANGE`, `FALLOC_FL_INSERT_RANGE`, and
+ * `FALLOC_FL_UNSHARE_RANGE`.
+ *
+ * Returns 0 on success and returns -1 and sets `errno` on failure.
+ */
+int fallocate(int __fd, int __mode, off_t __offset, off_t __length) __RENAME_IF_FILE_OFFSET64(fallocate64);
+/** See fallocate(). */
+int fallocate64(int __fd, int __mode, off64_t __offset, off64_t __length);
+
+/**
+ * [posix_fadvise(2)](https://man7.org/linux/man-pages/man2/posix_fadvise.2.html)
+ * declares an expected access pattern for file data.
+ *
+ * Valid flags are `POSIX_FADV_NORMAL`, `POSIX_FADV_RANDOM`,
+ * `POSIX_FADV_SEQUENTIAL`, `POSIX_FADV_WILLNEED`, `POSIX_FADV_DONTNEED`,
+ * and `POSIX_FADV_NOREUSE`.
+ *
+ * Returns 0 on success and returns an error number on failure.
+ */
+int posix_fadvise(int __fd, off_t __offset, off_t __length, int __advice) __RENAME_IF_FILE_OFFSET64(posix_fadvise64);
+/** See posix_fadvise(). */
+int posix_fadvise64(int __fd, off64_t __offset, off64_t __length, int __advice);
+
+/**
+ * [posix_fallocate(2)](https://man7.org/linux/man-pages/man2/posix_fallocate.2.html)
+ * allocates file space.
+ *
+ * Returns 0 on success and returns an error number on failure.
+ */
+int posix_fallocate(int __fd, off_t __offset, off_t __length) __RENAME_IF_FILE_OFFSET64(posix_fallocate64);
+/** See posix_fallocate(). */
+int posix_fallocate64(int __fd, off64_t __offset, off64_t __length);
+
+#if defined(__USE_GNU)
+
+/**
+ * [readahead(2)](https://man7.org/linux/man-pages/man2/readahead.2.html)
+ * initiates readahead for the given file.
+ *
+ * Returns 0 on success and returns -1 and sets `errno` on failure.
+ */
+ssize_t readahead(int __fd, off64_t __offset, size_t __length);
+
+/**
+ * [sync_file_range(2)](https://man7.org/linux/man-pages/man2/sync_file_range.2.html)
+ * syncs part of a file with disk.
+ *
+ * Valid flags are `SYNC_FILE_RANGE_WAIT_BEFORE`, `SYNC_FILE_RANGE_WRITE`, and
+ * `SYNC_FILE_RANGE_WAIT_AFTER`.
+ *
+ * Returns 0 on success and returns -1 and sets `errno` on failure.
+ */
+
+#if __BIONIC_AVAILABILITY_GUARD(26)
+int sync_file_range(int __fd, off64_t __offset, off64_t __length, unsigned int __flags) __INTRODUCED_IN(26);
+#endif /* __BIONIC_AVAILABILITY_GUARD(26) */
+
+
 #endif
-extern int fallocate64(int, int, off64_t, off64_t);
-extern int posix_fadvise64(int, off64_t, off64_t, int);
-extern int posix_fallocate64(int, off64_t, off64_t);
 
-extern int __open_2(const char*, int);
-extern int __open_real(const char*, int, ...) __RENAME(open);
-extern int __openat_2(int, const char*, int);
-extern int __openat_real(int, const char*, int, ...) __RENAME(openat);
-__errordecl(__creat_missing_mode, "called with O_CREAT, but missing mode");
-__errordecl(__creat_too_many_args, "too many arguments");
-
-#if defined(__BIONIC_FORTIFY)
-
-#if !defined(__clang__)
-
-__BIONIC_FORTIFY_INLINE
-int open(const char* pathname, int flags, ...) {
-    if (__builtin_constant_p(flags)) {
-        if ((flags & O_CREAT) && __builtin_va_arg_pack_len() == 0) {
-            __creat_missing_mode();  // compile time error
-        }
-    }
-
-    if (__builtin_va_arg_pack_len() > 1) {
-        __creat_too_many_args();  // compile time error
-    }
-
-    if ((__builtin_va_arg_pack_len() == 0) && !__builtin_constant_p(flags)) {
-        return __open_2(pathname, flags);
-    }
-
-    return __open_real(pathname, flags, __builtin_va_arg_pack());
-}
-
-__BIONIC_FORTIFY_INLINE
-int openat(int dirfd, const char* pathname, int flags, ...) {
-    if (__builtin_constant_p(flags)) {
-        if ((flags & O_CREAT) && __builtin_va_arg_pack_len() == 0) {
-            __creat_missing_mode();  // compile time error
-        }
-    }
-
-    if (__builtin_va_arg_pack_len() > 1) {
-        __creat_too_many_args();  // compile time error
-    }
-
-    if ((__builtin_va_arg_pack_len() == 0) && !__builtin_constant_p(flags)) {
-        return __openat_2(dirfd, pathname, flags);
-    }
-
-    return __openat_real(dirfd, pathname, flags, __builtin_va_arg_pack());
-}
-
-#endif /* !defined(__clang__) */
-
-#endif /* defined(__BIONIC_FORTIFY) */
+#if defined(__BIONIC_INCLUDE_FORTIFY_HEADERS)
+#include <bits/fortify/fcntl.h>
+#endif
 
 __END_DECLS
-
-#endif /* _FCNTL_H */

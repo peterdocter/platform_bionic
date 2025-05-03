@@ -1,6 +1,5 @@
 # common python utility routines for the Bionic tool scripts
 
-import commands
 import logging
 import os
 import string
@@ -31,8 +30,14 @@ def get_kernel_dir():
 
 def get_android_root():
     if "ANDROID_BUILD_TOP" in os.environ:
+        # Verify that the current directory is in the root.
+        # If not, then print an error.
+        cwd = os.getcwd()
+        root = os.environ["ANDROID_BUILD_TOP"]
+        if len(cwd) < len(root) or not root == cwd[:len(root)]:
+            panic("Not in android tree pointed at by ANDROID_BUILD_TOP (%s)\n" % root)
         return os.environ["ANDROID_BUILD_TOP"]
-    panic("Unable to find root of tree, did you forget to lunch a target?")
+    panic("Unable to find root of tree, did you forget to lunch a target?\n")
 
 
 class StringOutput:
@@ -140,19 +145,3 @@ class BatchFileUpdater:
 
         for dst in sorted(deletes):
             os.remove(dst)
-
-    def updateGitFiles(self):
-        adds, deletes, edits = self.getChanges()
-
-        if adds:
-            for dst in sorted(adds):
-                self._writeFile(dst)
-            commands.getoutput("git add " + " ".join(adds))
-
-        if deletes:
-            commands.getoutput("git rm " + " ".join(deletes))
-
-        if edits:
-            for dst in sorted(edits):
-                self._writeFile(dst)
-            commands.getoutput("git add " + " ".join(edits))

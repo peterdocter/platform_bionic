@@ -20,12 +20,16 @@
 #include <limits.h>
 #include <unistd.h>
 
+#include <android-base/test_utils.h>
+
+#include "utils.h"
+
 TEST(getcwd, auto_full) {
   // If we let the library do all the work, everything's fine.
   errno = 0;
-  char* cwd = getcwd(NULL, 0);
-  ASSERT_TRUE(cwd != NULL);
-  ASSERT_EQ(0, errno);
+  char* cwd = getcwd(nullptr, 0);
+  ASSERT_TRUE(cwd != nullptr);
+  ASSERT_ERRNO(0);
   ASSERT_GE(strlen(cwd), 1U);
   free(cwd);
 }
@@ -33,9 +37,9 @@ TEST(getcwd, auto_full) {
 TEST(getcwd, auto_reasonable) {
   // If we ask the library to allocate a reasonable buffer, everything's fine.
   errno = 0;
-  char* cwd = getcwd(NULL, PATH_MAX);
-  ASSERT_TRUE(cwd != NULL);
-  ASSERT_EQ(0, errno);
+  char* cwd = getcwd(nullptr, PATH_MAX);
+  ASSERT_TRUE(cwd != nullptr);
+  ASSERT_ERRNO(0);
   ASSERT_GE(strlen(cwd), 1U);
   free(cwd);
 }
@@ -43,17 +47,18 @@ TEST(getcwd, auto_reasonable) {
 TEST(getcwd, auto_too_small) {
   // If we ask the library to allocate a too-small buffer, ERANGE.
   errno = 0;
-  char* cwd = getcwd(NULL, 1);
-  ASSERT_TRUE(cwd == NULL);
-  ASSERT_EQ(ERANGE, errno);
+  char* cwd = getcwd(nullptr, 1);
+  ASSERT_TRUE(cwd == nullptr);
+  ASSERT_ERRNO(ERANGE);
 }
 
 TEST(getcwd, auto_too_large) {
+  SKIP_WITH_HWASAN << "allocation size too large";
   // If we ask the library to allocate an unreasonably large buffer, ERANGE.
   errno = 0;
-  char* cwd = getcwd(NULL, static_cast<size_t>(-1));
-  ASSERT_TRUE(cwd == NULL);
-  ASSERT_EQ(ENOMEM, errno);
+  char* cwd = getcwd(nullptr, static_cast<size_t>(-1));
+  ASSERT_TRUE(cwd == nullptr);
+  ASSERT_ERRNO(ENOMEM);
 }
 
 TEST(getcwd, manual_too_small) {
@@ -61,8 +66,8 @@ TEST(getcwd, manual_too_small) {
   char tiny_buf[1];
   errno = 0;
   char* cwd = getcwd(tiny_buf, sizeof(tiny_buf));
-  ASSERT_TRUE(cwd == NULL);
-  ASSERT_EQ(ERANGE, errno);
+  ASSERT_TRUE(cwd == nullptr);
+  ASSERT_ERRNO(ERANGE);
 }
 
 TEST(getcwd, manual_zero) {
@@ -70,8 +75,8 @@ TEST(getcwd, manual_zero) {
   char tiny_buf[1];
   errno = 0;
   char* cwd = getcwd(tiny_buf, 0);
-  ASSERT_TRUE(cwd == NULL);
-  ASSERT_EQ(EINVAL, errno);
+  ASSERT_TRUE(cwd == nullptr);
+  ASSERT_ERRNO(EINVAL);
 }
 
 TEST(getcwd, manual_path_max) {
@@ -79,7 +84,7 @@ TEST(getcwd, manual_path_max) {
   errno = 0;
   char* cwd = getcwd(buf, PATH_MAX);
   ASSERT_TRUE(cwd == buf);
-  ASSERT_EQ(0, errno);
+  ASSERT_ERRNO(0);
   ASSERT_GE(strlen(cwd), 1U);
   delete[] cwd;
 }

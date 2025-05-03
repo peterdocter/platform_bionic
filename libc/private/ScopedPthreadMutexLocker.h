@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef SCOPED_PTHREAD_MUTEX_LOCKER_H
-#define SCOPED_PTHREAD_MUTEX_LOCKER_H
+#pragma once
 
 #include <pthread.h>
 
-#include "bionic_macros.h"
+#include "platform/bionic/macros.h"
 
 class ScopedPthreadMutexLocker {
  public:
@@ -34,7 +33,5 @@ class ScopedPthreadMutexLocker {
  private:
   pthread_mutex_t* mu_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScopedPthreadMutexLocker);
+  BIONIC_DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedPthreadMutexLocker);
 };
-
-#endif // SCOPED_PTHREAD_MUTEX_LOCKER_H

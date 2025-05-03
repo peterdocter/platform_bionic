@@ -25,11 +25,35 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef _SYS_CACHECTL_H
-#define _SYS_CACHECTL_H 1
 
-#ifdef __mips__
-#include <asm/cachectl.h>
-extern int __cachectl (void *addr, __const int nbytes, __const int op);
+#pragma once
+
+/*
+ * @file sys/cachectl.h
+ * @brief Architecture-specific cache control.
+ */
+
+#include <sys/cdefs.h>
+
+__BEGIN_DECLS
+
+#if defined(__riscv)
+
+/**
+ * Flag for __riscv_flush_icache() to indicate that only the current
+ * thread's instruction cache needs to be flushed (rather than the
+ * default of all threads).
+ */
+#define SYS_RISCV_FLUSH_ICACHE_LOCAL 1UL
+
+/**
+ * __riscv_flush_icache(2) flushes the instruction cache for the given range of addresses.
+ * The address range is currently (Linux 6.12) ignored, so both pointers may be null.
+ *
+ * Returns 0 on success, and returns -1 and sets `errno` on failure.
+ */
+int __riscv_flush_icache(void* _Nullable __start, void* _Nullable __end, unsigned long __flags);
+
 #endif
-#endif /* sys/cachectl.h */
+
+__END_DECLS

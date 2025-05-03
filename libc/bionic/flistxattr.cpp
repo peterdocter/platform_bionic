@@ -33,27 +33,26 @@
 #include <fcntl.h>
 #include <stdio.h>
 
-extern "C" ssize_t ___flistxattr(int, char*, size_t);
+#include "private/FdPath.h"
 
-ssize_t flistxattr(int fd, char *list, size_t size) {
+extern "C" ssize_t __flistxattr(int, char*, size_t);
+
+ssize_t flistxattr(int fd, char* list, size_t size) {
   int saved_errno = errno;
-  ssize_t result = ___flistxattr(fd, list, size);
-
-  if ((result != -1) || (errno != EBADF)) {
+  ssize_t result = __flistxattr(fd, list, size);
+  if (result != -1 || errno != EBADF) {
     return result;
   }
 
   // fd could be an O_PATH file descriptor, and the kernel
-  // may not directly support fgetxattr() on such a file descriptor.
+  // may not directly support flistxattr() on such a file descriptor.
   // Use /proc/self/fd instead to emulate this support.
   int fd_flag = fcntl(fd, F_GETFL);
-  if ((fd_flag == -1) || ((fd_flag & O_PATH) == 0)) {
+  if (fd_flag == -1 || (fd_flag & O_PATH) == 0) {
     errno = EBADF;
     return -1;
   }
 
-  char buf[40];
-  snprintf(buf, sizeof(buf), "/proc/self/fd/%d", fd);
   errno = saved_errno;
-  return listxattr(buf, list, size);
+  return listxattr(FdPath(fd).c_str(), list, size);
 }

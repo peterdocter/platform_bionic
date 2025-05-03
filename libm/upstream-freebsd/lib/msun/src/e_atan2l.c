@@ -1,5 +1,4 @@
 
-/* @(#)e_atan2.c 1.3 95/01/18 */
 /* FreeBSD: head/lib/msun/src/e_atan2.c 176451 2008-02-22 02:30:36Z das */
 /*
  * ====================================================
@@ -12,9 +11,6 @@
  * ====================================================
  *
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 /*
  * See comments in e_atan2.c.
@@ -62,7 +58,7 @@ atan2l(long double y, long double x)
 	     ((ux.bits.manh&~LDBL_NBIT)|ux.bits.manl)!=0) ||	/* x is NaN */
 	    (expty==BIAS+LDBL_MAX_EXP &&
 	     ((uy.bits.manh&~LDBL_NBIT)|uy.bits.manl)!=0))	/* y is NaN */
-	    return x+y;
+	    return nan_mix(x, y);
 	if (expsignx==BIAS && ((ux.bits.manh&~LDBL_NBIT)|ux.bits.manl)==0)
 	    return atanl(y);					/* x=1.0 */
 	m = ((expsigny>>15)&1)|((expsignx>>14)&2);	/* 2*sign(x)+sign(y) */

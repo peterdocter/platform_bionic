@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-#ifndef BIONIC_SYSTRACE_H
-#define BIONIC_SYSTRACE_H
+#pragma once
 
-#include "bionic_macros.h"
+#include "platform/bionic/macros.h"
 
 // Tracing class for bionic. To begin a trace at a specified point:
 //   ScopedTrace("Trace message");
@@ -28,8 +27,11 @@ class __LIBC_HIDDEN__ ScopedTrace {
   explicit ScopedTrace(const char* message);
   ~ScopedTrace();
 
+  void End();
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScopedTrace);
+  bool called_end_;
+  BIONIC_DISALLOW_COPY_AND_ASSIGN(ScopedTrace);
 };
 
-#endif
+void bionic_trace_begin(const char* message);
+void bionic_trace_end();

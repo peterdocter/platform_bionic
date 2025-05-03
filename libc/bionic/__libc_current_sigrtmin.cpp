@@ -28,10 +28,8 @@
 
 #include <signal.h>
 
-// POSIX timers use __SIGRTMIN + 0.
-// libbacktrace uses __SIGRTMIN + 1.
-// libcore uses __SIGRTMIN + 2.
+#include <platform/bionic/reserved_signals.h>
 
-int __libc_current_sigrtmin(void) {
-  return __SIGRTMIN + 3;
+int __libc_current_sigrtmin() {
+  return __SIGRTMIN + __SIGRT_RESERVED;
 }

@@ -1,4 +1,3 @@
-/* @(#)e_fmod.c 1.3 95/01/18 */
 /*-
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -9,9 +8,6 @@
  * is preserved.
  * ====================================================
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 #include <float.h>
 
@@ -44,7 +40,7 @@ remquo(double x, double y, int *quo)
     /* purge off exception values */
 	if((hy|ly)==0||(hx>=0x7ff00000)||	/* y=0,or x not finite */
 	  ((hy|((ly|-ly)>>31))>0x7ff00000))	/* or y is NaN */
-	    return (x*y)/(x*y);
+	    return nan_mix_op(x, y, *)/nan_mix_op(x, y, *);
 	if(hx<=hy) {
 	    if((hx<hy)||(lx<ly)) {
 		q = 0;

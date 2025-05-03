@@ -1,9 +1,10 @@
-/*	$OpenBSD: arc4random.c,v 1.50 2014/07/21 18:13:12 deraadt Exp $	*/
+/*	$OpenBSD: arc4random.c,v 1.58 2022/07/31 13:41:45 tb Exp $	*/
 
 /*
  * Copyright (c) 1996, David Mazieres <dm@uun.org>
  * Copyright (c) 2008, Damien Miller <djm@openbsd.org>
  * Copyright (c) 2013, Markus Friedl <markus@openbsd.org>
+ * Copyright (c) 2014, Theo de Raadt <deraadt@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,23 +31,25 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/time.h>
 
 #define KEYSTREAM_ONLY
 #include "chacha_private.h"
 
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#ifdef __GNUC__
+#define minimum(a, b) ((a) < (b) ? (a) : (b))
+
+#if defined(__GNUC__) || defined(_MSC_VER)
 #define inline __inline
-#else				/* !__GNUC__ */
+#else				/* __GNUC__ || _MSC_VER */
 #define inline
-#endif				/* !__GNUC__ */
+#endif				/* !__GNUC__ && !_MSC_VER */
 
 #define KEYSZ	32
 #define IVSZ	8
 #define BLOCKSZ	64
 #define RSBUFSZ	(16*BLOCKSZ)
+
+#define REKEY_BASE	(1024*1024) /* NB. should be a power of 2 */
 
 /* Marked MAP_INHERIT_ZERO, so zero'd out in fork children. */
 static struct _rs {
@@ -77,7 +80,7 @@ _rs_init(u_char *buf, size_t n)
 			abort();
 	}
 
-	chacha_keysetup(&rsx->rs_chacha, buf, KEYSZ * 8, 0);
+	chacha_keysetup(&rsx->rs_chacha, buf, KEYSZ * 8);
 	chacha_ivsetup(&rsx->rs_chacha, buf + KEYSZ);
 }
 
@@ -85,6 +88,7 @@ static void
 _rs_stir(void)
 {
 	u_char rnd[KEYSZ + IVSZ];
+	uint32_t rekey_fuzz = 0;
 
 	if (getentropy(rnd, sizeof rnd) == -1)
 		_getentropy_fail();
@@ -99,7 +103,10 @@ _rs_stir(void)
 	rs->rs_have = 0;
 	memset(rsx->rs_buf, 0, sizeof(rsx->rs_buf));
 
-	rs->rs_count = 1600000;
+	/* rekey interval should not be predictable */
+	chacha_encrypt_bytes(&rsx->rs_chacha, (uint8_t *)&rekey_fuzz,
+	    (uint8_t *)&rekey_fuzz, sizeof(rekey_fuzz));
+	rs->rs_count = REKEY_BASE + (rekey_fuzz % REKEY_BASE);
 }
 
 static inline void
@@ -127,7 +134,7 @@ _rs_rekey(u_char *dat, size_t datlen)
 	if (dat) {
 		size_t i, m;
 
-		m = min(datlen, KEYSZ + IVSZ);
+		m = minimum(datlen, KEYSZ + IVSZ);
 		for (i = 0; i < m; i++)
 			rsx->rs_buf[i] ^= dat[i];
 	}
@@ -147,7 +154,7 @@ _rs_random_buf(void *_buf, size_t n)
 	_rs_stir_if_needed(n);
 	while (n > 0) {
 		if (rs->rs_have > 0) {
-			m = min(n, rs->rs_have);
+			m = minimum(n, rs->rs_have);
 			keystream = rsx->rs_buf + sizeof(rsx->rs_buf)
 			    - rs->rs_have;
 			memcpy(buf, keystream, m);
@@ -185,6 +192,7 @@ arc4random(void)
 	_ARC4_UNLOCK();
 	return val;
 }
+DEF_WEAK(arc4random);
 
 void
 arc4random_buf(void *buf, size_t n)
@@ -193,3 +201,4 @@ arc4random_buf(void *buf, size_t n)
 	_rs_random_buf(buf, n);
 	_ARC4_UNLOCK();
 }
+DEF_WEAK(arc4random_buf);

@@ -31,29 +31,27 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#ifdef __arm__
-extern "C" __LIBC_HIDDEN__ void __libc_android_abort()
-#else
-void abort()
-#endif
-{
-  // Don't block SIGABRT to give any signal handler a chance; we ignore
-  // any errors -- X311J doesn't allow abort to return anyway.
-  sigset_t mask;
-  sigfillset(&mask);
-  sigdelset(&mask, SIGABRT);
-  sigprocmask(SIG_SETMASK, &mask, NULL);
+#include "private/bionic_inline_raise.h"
 
-  raise(SIGABRT);
+void abort() {
+  // Since abort() must not return, there's no error checking in this function:
+  // there's no way to report an error anyway.
 
-  // If SIGABRT ignored, or caught and the handler returns,
-  // remove the SIGABRT signal handler and raise SIGABRT again.
-  struct sigaction sa;
-  sa.sa_handler = SIG_DFL;
-  sa.sa_flags   = SA_RESTART;
-  sigemptyset(&sa.sa_mask);
-  sigaction(SIGABRT, &sa, &sa);
-  sigprocmask(SIG_SETMASK, &mask, NULL);
-  raise(SIGABRT);
-  _exit(1);
+  // Unblock SIGABRT to give any signal handler a chance.
+  sigset64_t mask;
+  sigemptyset64(&mask);
+  sigaddset64(&mask, SIGABRT);
+  sigprocmask64(SIG_UNBLOCK, &mask, nullptr);
+
+  // Use inline_raise() to raise SIGABRT without adding an uninteresting
+  // stack frame that anyone investigating the crash would have to ignore.
+  inline_raise(SIGABRT);
+
+  // If that signal was ignored or was caught and the handler returned,
+  // remove the signal handler and raise SIGABRT again.
+  signal(SIGABRT, SIG_DFL);
+  inline_raise(SIGABRT);
+
+  // If we get this far, just exit.
+  _exit(127);
 }

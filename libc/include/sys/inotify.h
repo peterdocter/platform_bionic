@@ -33,18 +33,14 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <linux/inotify.h>
-#include <asm/fcntl.h> /* For O_CLOEXEC and O_NONBLOCK. */
 
 __BEGIN_DECLS
 
-#define IN_CLOEXEC O_CLOEXEC
-#define IN_NONBLOCK O_NONBLOCK
-
-extern int inotify_init(void);
-extern int inotify_init1(int);
-extern int inotify_add_watch(int, const char*, uint32_t);
-extern int inotify_rm_watch(int, uint32_t);
+int inotify_init(void);
+int inotify_init1(int __flags);
+int inotify_add_watch(int __fd, const char* _Nonnull __path, uint32_t __mask);
+int inotify_rm_watch(int __fd, uint32_t __watch_descriptor);
 
 __END_DECLS
 
-#endif /* _SYS_INOTIFY_H_ */
+#endif

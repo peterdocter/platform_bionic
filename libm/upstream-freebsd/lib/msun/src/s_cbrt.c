@@ -1,4 +1,3 @@
-/* @(#)s_cbrt.c 5.1 93/09/24 */
 /*
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -12,9 +11,7 @@
  * Optimized by Bruce D. Evans.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
+#include <float.h>
 #include "math.h"
 #include "math_private.h"
 
@@ -59,7 +56,7 @@ cbrt(double x)
      * error of about 1 in 16.  Adding a bias of -0.03306235651 to the
      * (e%3+m)/3 term reduces the error to about 1 in 32. With the IEEE
      * floating point representation, for finite positive normal values,
-     * ordinary integer divison of the value in bits magically gives
+     * ordinary integer division of the value in bits magically gives
      * almost exactly the RHS of the above provided we first subtract the
      * exponent bias (1023 for doubles) and later add it back.  We do the
      * subtraction virtually to keep e >= 0 so that ordinary integer
@@ -107,7 +104,7 @@ cbrt(double x)
 	r=x/s;				/* error <= 0.5 ulps; |r| < |t| */
 	w=t+t;				/* t+t is exact */
 	r=(r-t)/(w+r);			/* r-t is exact; w+r ~= 3*t */
-	t=t+t*r;			/* error <= 0.5 + 0.5/3 + epsilon */
+	t=t+t*r;			/* error <= (0.5 + 0.5/3) * ulp */
 
 	return(t);
 }

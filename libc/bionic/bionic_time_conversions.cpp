@@ -52,18 +52,32 @@ void timeval_from_timespec(timeval& tv, const timespec& ts) {
   tv.tv_usec = ts.tv_nsec / 1000;
 }
 
-// Initializes 'ts' with the difference between 'abs_ts' and the current time
-// according to 'clock'. Returns false if abstime already expired, true otherwise.
-bool timespec_from_absolute_timespec(timespec& ts, const timespec& abs_ts, clockid_t clock) {
-  clock_gettime(clock, &ts);
-  ts.tv_sec = abs_ts.tv_sec - ts.tv_sec;
-  ts.tv_nsec = abs_ts.tv_nsec - ts.tv_nsec;
-  if (ts.tv_nsec < 0) {
-    ts.tv_sec--;
-    ts.tv_nsec += NS_PER_S;
+static void convert_timespec_clocks(timespec& new_time, clockid_t new_clockbase,
+                                    const timespec& old_time, clockid_t old_clockbase) {
+  // get reference clocks
+  timespec new_clock;
+  clock_gettime(new_clockbase, &new_clock);
+  timespec old_clock;
+  clock_gettime(old_clockbase, &old_clock);
+
+  // compute new time by moving old delta to the new clock.
+  new_time.tv_sec = old_time.tv_sec - old_clock.tv_sec + new_clock.tv_sec;
+  new_time.tv_nsec = old_time.tv_nsec - old_clock.tv_nsec + new_clock.tv_nsec;
+
+  // correct nsec to second wrap.
+  if (new_time.tv_nsec >= NS_PER_S) {
+    new_time.tv_nsec -= NS_PER_S;
+    new_time.tv_sec += 1;
+  } else if (new_time.tv_nsec < 0) {
+    new_time.tv_nsec += NS_PER_S;
+    new_time.tv_sec -= 1;
   }
-  if (ts.tv_nsec < 0 || ts.tv_sec < 0) {
-    return false;
-  }
-  return true;
+}
+
+void monotonic_time_from_realtime_time(timespec& monotonic_time, const timespec& realtime_time) {
+  convert_timespec_clocks(monotonic_time, CLOCK_MONOTONIC, realtime_time, CLOCK_REALTIME);
+}
+
+void realtime_time_from_monotonic_time(timespec& realtime_time, const timespec& monotonic_time) {
+  convert_timespec_clocks(realtime_time, CLOCK_REALTIME, monotonic_time, CLOCK_MONOTONIC);
 }

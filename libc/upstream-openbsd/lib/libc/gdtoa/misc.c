@@ -40,6 +40,10 @@ THIS SOFTWARE.
 static double private_mem[PRIVATE_mem], *pmem_next = private_mem;
 #endif
 
+#ifdef MULTIPLE_THREADS
+static void *__dtoa_locks[] = { NULL, NULL };
+#endif
+
  Bigint *
 Balloc
 #ifdef KR_headers
@@ -98,9 +102,9 @@ Bfree
 	if (v) {
 		if (v->k > Kmax)
 #ifdef FREE
-			FREE((void*)v);
+			FREE(v);
 #else
-			free((void*)v);
+			free(v);
 #endif
 		else {
 			ACQUIRE_DTOA_LOCK(0);
@@ -876,6 +880,8 @@ tens[] = {
 #endif
 		};
 
+#ifdef NO_STRING_H
+
  char *
 #ifdef KR_headers
 strcp_D2A(a, b) char *a; char *b;
@@ -887,8 +893,6 @@ strcp_D2A(char *a, CONST char *b)
 		a++;
 	return a;
 	}
-
-#ifdef NO_STRING_H
 
  Char *
 #ifdef KR_headers

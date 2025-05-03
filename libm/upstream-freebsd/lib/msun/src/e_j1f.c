@@ -13,9 +13,6 @@
  * ====================================================
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/msun/src/e_j1f.c 283032 2015-05-17 16:27:06Z kargl $");
-
 /*
  * See e_j1.c for complete comments.
  */
@@ -32,7 +29,7 @@ huge    = 1e30,
 one	= 1.0,
 invsqrtpi=  5.6418961287e-01, /* 0x3f106ebb */
 tpi      =  6.3661974669e-01, /* 0x3f22f983 */
-	/* R0/S0 on [0,2] */
+/* R0/S0 on [0,2] */
 r00  = -6.2500000000e-02, /* 0xbd800000 */
 r01  =  1.4070566976e-03, /* 0x3ab86cfd */
 r02  = -1.5995563444e-05, /* 0xb7862e36 */
@@ -46,7 +43,7 @@ s05  =  1.2354227016e-11; /* 0x2d59567e */
 static const float zero    = 0.0;
 
 float
-__ieee754_j1f(float x)
+j1f(float x)
 {
 	float z, s,c,ss,cc,r,u,v,y;
 	int32_t hx,ix;
@@ -56,8 +53,7 @@ __ieee754_j1f(float x)
 	if(ix>=0x7f800000) return one/x;
 	y = fabsf(x);
 	if(ix >= 0x40000000) {	/* |x| >= 2.0 */
-		s = sinf(y);
-		c = cosf(y);
+		sincosf(y, &s, &c);
 		ss = -s-c;
 		cc = s-c;
 		if(ix<0x7f000000) {  /* make sure y+y not overflow */
@@ -103,7 +99,7 @@ static const float V0[5] = {
 };
 
 float
-__ieee754_y1f(float x)
+y1f(float x)
 {
 	float z, s,c,ss,cc,u,v;
 	int32_t hx,ix;
@@ -114,8 +110,7 @@ __ieee754_y1f(float x)
 	if(ix==0) return -one/vzero;
 	if(hx<0) return vzero/vzero;
         if(ix >= 0x40000000) {  /* |x| >= 2.0 */
-                s = sinf(x);
-                c = cosf(x);
+                sincosf(x, &s, &c);
                 ss = -s-c;
                 cc = s-c;
                 if(ix<0x7f000000) {  /* make sure x+x not overflow */
@@ -147,7 +142,7 @@ __ieee754_y1f(float x)
         z = x*x;
         u = U0[0]+z*(U0[1]+z*(U0[2]+z*(U0[3]+z*U0[4])));
         v = one+z*(V0[0]+z*(V0[1]+z*(V0[2]+z*(V0[3]+z*V0[4]))));
-        return(x*(u/v) + tpi*(__ieee754_j1f(x)*__ieee754_logf(x)-one/x));
+        return(x*(u/v) + tpi*(j1f(x)*logf(x)-one/x));
 }
 
 /* For x >= 8, the asymptotic expansions of pone is

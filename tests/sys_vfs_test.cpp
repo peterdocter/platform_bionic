@@ -24,13 +24,34 @@
 
 #include <string>
 
+#include "utils.h"
+
 template <typename StatFsT> void Check(StatFsT& sb) {
+#if defined(__x86_64__)
+  // On x86_64 based 16kb page size targets, the page size in userspace is simulated to 16kb but
+  // the underlying filesystem block size would remain unchanged, i.e., 4kb.
+  // For more info:
+  // https://source.android.com/docs/core/architecture/16kb-page-size/getting-started-cf-x86-64-pgagnostic
   EXPECT_EQ(4096, static_cast<int>(sb.f_bsize));
+#else
+  EXPECT_EQ(getpagesize(), static_cast<int>(sb.f_bsize));
+#endif
   EXPECT_EQ(0U, sb.f_bfree);
   EXPECT_EQ(0U, sb.f_ffree);
-  EXPECT_EQ(0, sb.f_fsid.__val[0]);
-  EXPECT_EQ(0, sb.f_fsid.__val[1]);
   EXPECT_EQ(255, static_cast<int>(sb.f_namelen));
+
+  // Linux 6.7 requires that all filesystems have a non-zero fsid.
+  if (sb.f_fsid.__val[0] != 0U) {
+    // fs/libfs.c reuses the filesystem's device number.
+    struct stat proc_sb;
+    ASSERT_EQ(0, stat("/proc", &proc_sb));
+    EXPECT_EQ(static_cast<int>(proc_sb.st_dev), sb.f_fsid.__val[0]);
+    EXPECT_EQ(0, sb.f_fsid.__val[1]);
+  } else {
+    // Prior to that, the fsid for /proc was just 0.
+    EXPECT_EQ(0, sb.f_fsid.__val[0]);
+    EXPECT_EQ(0, sb.f_fsid.__val[1]);
+  }
 
   // The kernel sets a private bit to indicate that f_flags is valid.
   // This flag is not supposed to be exposed to libc clients.
@@ -44,10 +65,24 @@ TEST(sys_vfs, statfs) {
   Check(sb);
 }
 
-TEST(sys_vfs, statfs64) {
+TEST(sys_vfs, statfs_failure) {
+  struct statfs sb;
+  errno = 0;
+  ASSERT_EQ(-1, statfs("/does-not-exist", &sb));
+  ASSERT_ERRNO(ENOENT);
+}
+
+TEST(sys_vfs, statfs64_smoke) {
   struct statfs64 sb;
   ASSERT_EQ(0, statfs64("/proc", &sb));
   Check(sb);
+}
+
+TEST(sys_vfs, statfs64_failure) {
+  struct statfs64 sb;
+  errno = 0;
+  ASSERT_EQ(-1, statfs64("/does-not-exist", &sb));
+  ASSERT_ERRNO(ENOENT);
 }
 
 TEST(sys_vfs, fstatfs) {
@@ -58,10 +93,24 @@ TEST(sys_vfs, fstatfs) {
   Check(sb);
 }
 
-TEST(sys_vfs, fstatfs64) {
+TEST(sys_vfs, fstatfs_failure) {
+  struct statfs sb;
+  errno = 0;
+  ASSERT_EQ(-1, fstatfs(-1, &sb));
+  ASSERT_ERRNO(EBADF);
+}
+
+TEST(sys_vfs, fstatfs64_smoke) {
   struct statfs64 sb;
   int fd = open("/proc", O_RDONLY);
   ASSERT_EQ(0, fstatfs64(fd, &sb));
   close(fd);
   Check(sb);
+}
+
+TEST(sys_vfs, fstatfs64_failure) {
+  struct statfs sb;
+  errno = 0;
+  ASSERT_EQ(-1, fstatfs(-1, &sb));
+  ASSERT_ERRNO(EBADF);
 }

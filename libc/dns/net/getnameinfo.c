@@ -54,8 +54,6 @@ __RCSID("$NetBSD: getnameinfo.c,v 1.53 2012/09/26 23:13:00 christos Exp $");
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <net/if.h>
-#include <net/if_ieee1394.h>
-#include <net/if_types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <assert.h>
@@ -64,12 +62,20 @@ __RCSID("$NetBSD: getnameinfo.c,v 1.53 2012/09/26 23:13:00 christos Exp $");
 #include <arpa/nameser.h>
 #include "resolv_netid.h"
 #include "resolv_private.h"
-#include <sys/system_properties.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stddef.h>
 #include <string.h>
+
+#include "private/bionic_defs.h"
+
+/* This macro is modelled after the ones in <netinet/in6.h>. */
+/* RFC 6052, section 2.1 */
+#define IN6_IS_ADDR_WKP(a) \
+  ((((a)->s6_addr32[0]) == ntohl(0x0064ff9b)) && \
+   (((a)->s6_addr32[1]) == 0) && \
+   (((a)->s6_addr32[2]) == 0))
 
 static const struct afd {
 	int		a_af;
@@ -106,6 +112,7 @@ static int getnameinfo_local(const struct sockaddr *, socklen_t, char *,
  * Top-level getnameinfo() code.  Look at the address family, and pick an
  * appropriate function to call.
  */
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int getnameinfo(const struct sockaddr* sa, socklen_t salen, char* host, size_t hostlen,
 		char* serv, size_t servlen, int flags)
 {
@@ -251,6 +258,8 @@ getnameinfo_inet(const struct sockaddr* sa, socklen_t salen,
 				;
 			else if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr))
 				;
+			else if (IN6_IS_ADDR_WKP(&sin6->sin6_addr))
+				;
 			else
 				flags |= NI_NUMERICHOST;
 			break;
@@ -303,7 +312,10 @@ getnameinfo_inet(const struct sockaddr* sa, socklen_t salen,
 			break;
 		}
 	} else {
-		hp = android_gethostbyaddrfornet_proxy(addr, afd->a_addrlen, afd->a_af, netid, mark);
+		// This code should only run in the app context, not inside netd, so netid is
+		// the app's netid.  netd doesn't use getnameinfo for network requests.
+		const struct android_net_context netcontext = { .app_netid = netid, .app_mark = mark };
+		hp = android_gethostbyaddrfornetcontext_proxy(addr, afd->a_addrlen, afd->a_af, &netcontext);
 		if (hp) {
 #if 0
 			/*

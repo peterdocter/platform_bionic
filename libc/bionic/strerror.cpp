@@ -26,12 +26,69 @@
  * SUCH DAMAGE.
  */
 
+// -std=gnu++XX automatically defines _GNU_SOURCE, which then means that <string.h>
+// gives us the GNU variant, which is not what we're defining here.
+#undef _GNU_SOURCE
+
 #include <string.h>
-#include "private/ThreadLocalBuffer.h"
 
-extern "C" const char* __strerror_lookup(int);
+#include <errno.h>
+#include <limits.h>
 
-static ThreadLocalBuffer<char, NL_TEXTMAX> g_strerror_tls_buffer;
+#include <async_safe/log.h>
+
+#include "private/ErrnoRestorer.h"
+
+#include <string.h>
+
+#include "bionic/pthread_internal.h"
+
+static const char* __sys_error_descriptions[] = {
+#define __BIONIC_ERRDEF(error_number, error_description) [error_number] = error_description,
+#include "private/bionic_errdefs.h"
+};
+
+static const char* __sys_error_names[] = {
+#define __BIONIC_ERRDEF(error_number, error_description) [error_number] = #error_number,
+#include "private/bionic_errdefs.h"
+};
+
+extern "C" const char* strerrorname_np(int error_number) {
+  if (error_number < 0 || error_number >= static_cast<int>(arraysize(__sys_error_names))) {
+    return nullptr;
+  }
+  return __sys_error_names[error_number];
+}
+
+static inline const char* __strerror_lookup(int error_number) {
+  if (error_number < 0 || error_number >= static_cast<int>(arraysize(__sys_error_descriptions))) {
+    return nullptr;
+  }
+  return __sys_error_descriptions[error_number];
+}
+
+int strerror_r(int error_number, char* buf, size_t buf_len) {
+  ErrnoRestorer errno_restorer;
+  size_t length;
+
+  const char* error_name = __strerror_lookup(error_number);
+  if (error_name != nullptr) {
+    length = strlcpy(buf, error_name, buf_len);
+  } else {
+    length = async_safe_format_buffer(buf, buf_len, "Unknown error %d", error_number);
+  }
+  if (length >= buf_len) {
+    return ERANGE;
+  }
+
+  return 0;
+}
+
+extern "C" char* __gnu_strerror_r(int error_number, char* buf, size_t buf_len) {
+  ErrnoRestorer errno_restorer; // The glibc strerror_r doesn't set errno if it truncates...
+  strerror_r(error_number, buf, buf_len);
+  return buf; // ...and just returns whatever fit.
+}
 
 char* strerror(int error_number) {
   // Just return the original constant in the easy cases.
@@ -40,7 +97,9 @@ char* strerror(int error_number) {
     return result;
   }
 
-  result = g_strerror_tls_buffer.get();
-  strerror_r(error_number, result, g_strerror_tls_buffer.size());
+  bionic_tls& tls = __get_bionic_tls();
+  result = tls.strerror_buf;
+  strerror_r(error_number, result, sizeof(tls.strerror_buf));
   return result;
 }
+__strong_alias(strerror_l, strerror);

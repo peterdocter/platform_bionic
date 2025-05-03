@@ -29,16 +29,35 @@
  *	@(#)paths.h	8.1 (Berkeley) 6/2/93
  */
 
-#ifndef _PATHS_H_
-#define	_PATHS_H_
+#pragma once
 
-#define	_PATH_BSHELL	"/system/bin/sh"
-#define	_PATH_CONSOLE	"/dev/console"
-#define	_PATH_DEFPATH	"/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin"
-#define	_PATH_DEV	"/dev/"
-#define	_PATH_DEVNULL	"/dev/null"
-#define	_PATH_KLOG	"/proc/kmsg"
-#define	_PATH_MOUNTED	"/proc/mounts"
-#define	_PATH_TTY	"/dev/tty"
+/**
+ * @file paths.h
+ * @brief Default paths.
+ */
 
-#endif /* !_PATHS_H_ */
+#include <sys/cdefs.h>
+
+/** Path to the default system shell. Historically the 'B' was to specify the Bourne shell. */
+#define _PATH_BSHELL "/system/bin/sh"
+
+/** Path to the system console. */
+#define _PATH_CONSOLE "/dev/console"
+
+/** Default shell search path. */
+#define _PATH_DEFPATH "/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/apex/com.android.virt/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin"
+
+/** Path to the directory containing device files. */
+#define _PATH_DEV "/dev/"
+
+/** Path to `/dev/null`. */
+#define _PATH_DEVNULL "/dev/null"
+
+/** Path to the kernel log. */
+#define _PATH_KLOG "/proc/kmsg"
+
+/** Path to `/proc/mounts` for setmntent(). */
+#define _PATH_MOUNTED "/proc/mounts"
+
+/** Path to the calling process' tty. */
+#define _PATH_TTY "/dev/tty"

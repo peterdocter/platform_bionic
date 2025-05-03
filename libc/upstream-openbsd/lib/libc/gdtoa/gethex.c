@@ -57,17 +57,14 @@ gethex( CONST char **sp, FPI *fpi, Long *exp, Bigint **bp, int sign)
 	static unsigned char *decimalpoint_cache;
 	if (!(s0 = decimalpoint_cache)) {
 		s0 = (unsigned char*)localeconv()->decimal_point;
-		if ((decimalpoint_cache = (char*)MALLOC(strlen(s0) + 1))) {
-			strlcpy(decimalpoint_cache, s0, strlen(s0) + 1);
-			s0 = decimalpoint_cache;
-			}
-		}
+		decimalpoint_cache = strdup(s0);
+	}
 	decimalpoint = s0;
 #endif
 #endif
 
 	if (!hexdig['0'])
-		hexdig_init_D2A();
+		__hexdig_init_D2A();
 	*bp = 0;
 	havedig = 0;
 	s0 = *(CONST unsigned char **)sp + 2;

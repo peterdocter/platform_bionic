@@ -19,63 +19,196 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <benchmark/Benchmark.h>
+#include <benchmark/benchmark.h>
+#include "util.h"
 
-BENCHMARK_NO_ARG(BM_time_clock_gettime);
-void BM_time_clock_gettime::Run(int iters) {
-  StartBenchmarkTiming();
+// Musl doesn't define __NR_gettimeofday, __NR_clock_gettime32, __NR_gettimeofday_time32 or
+// __NR_clock_getres on 32-bit architectures.
+#if !defined(__NR_gettimeofday)
+#define __NR_gettimeofday __NR_gettimeofday_time32
+#endif
+#if !defined(__NR_clock_gettime)
+#define __NR_clock_gettime __NR_clock_gettime32
+#endif
+#if !defined(__NR_gettimeofday)
+#define __NR_gettimeofday __NR_gettimeofday_time32
+#endif
+#if !defined(__NR_clock_getres)
+#define __NR_clock_getres __NR_clock_getres_time32
+#endif
 
+static void BM_time_clock_gettime(benchmark::State& state) {
+  // CLOCK_MONOTONIC is required supported in vdso
   timespec t;
-  for (int i = 0; i < iters; ++i) {
+  while (state.KeepRunning()) {
     clock_gettime(CLOCK_MONOTONIC, &t);
   }
-
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK(BM_time_clock_gettime);
 
-BENCHMARK_NO_ARG(BM_time_clock_gettime_syscall);
-void BM_time_clock_gettime_syscall::Run(int iters) {
-  StartBenchmarkTiming();
-
+static void BM_time_clock_gettime_syscall(benchmark::State& state) {
+  // CLOCK_MONOTONIC is required supported in vdso
   timespec t;
-  for (int i = 0; i < iters; ++i) {
+  while (state.KeepRunning()) {
     syscall(__NR_clock_gettime, CLOCK_MONOTONIC, &t);
   }
-
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK(BM_time_clock_gettime_syscall);
 
-BENCHMARK_NO_ARG(BM_time_gettimeofday);
-void BM_time_gettimeofday::Run(int iters) {
-  StartBenchmarkTiming();
+static void BM_time_clock_gettime_MONOTONIC_COARSE(benchmark::State& state) {
+  // CLOCK_MONOTONIC_COARSE is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_gettime_MONOTONIC_COARSE);
 
+static void BM_time_clock_gettime_MONOTONIC_RAW(benchmark::State& state) {
+  // CLOCK_MONOTONIC_RAW is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_gettime_MONOTONIC_RAW);
+
+static void BM_time_clock_gettime_REALTIME(benchmark::State& state) {
+  // CLOCK_REALTIME is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_gettime(CLOCK_REALTIME, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_gettime_REALTIME);
+
+static void BM_time_clock_gettime_REALTIME_COARSE(benchmark::State& state) {
+  // CLOCK_REALTIME_COARSE is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_gettime(CLOCK_REALTIME_COARSE, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_gettime_REALTIME_COARSE);
+
+static void BM_time_clock_gettime_BOOTTIME(benchmark::State& state) {
+  // CLOCK_BOOTTIME is optionally supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_gettime(CLOCK_BOOTTIME, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_gettime_BOOTTIME);
+
+static void BM_time_clock_getres(benchmark::State& state) {
+  // CLOCK_MONOTONIC is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_getres(CLOCK_MONOTONIC, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres);
+
+static void BM_time_clock_getres_syscall(benchmark::State& state) {
+  // CLOCK_MONOTONIC is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    syscall(__NR_clock_getres, CLOCK_MONOTONIC, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres_syscall);
+
+static void BM_time_clock_getres_MONOTONIC_COARSE(benchmark::State& state) {
+  // CLOCK_MONOTONIC_COARSE is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_getres(CLOCK_MONOTONIC_COARSE, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres_MONOTONIC_COARSE);
+
+static void BM_time_clock_getres_MONOTONIC_RAW(benchmark::State& state) {
+  // CLOCK_MONOTONIC_RAW is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_getres(CLOCK_MONOTONIC_RAW, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres_MONOTONIC_RAW);
+
+static void BM_time_clock_getres_REALTIME(benchmark::State& state) {
+  // CLOCK_REALTIME is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_getres(CLOCK_REALTIME, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres_REALTIME);
+
+static void BM_time_clock_getres_REALTIME_COARSE(benchmark::State& state) {
+  // CLOCK_REALTIME_COARSE is required supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_getres(CLOCK_REALTIME_COARSE, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres_REALTIME_COARSE);
+
+static void BM_time_clock_getres_BOOTTIME(benchmark::State& state) {
+  // CLOCK_BOOTTIME is optionally supported in vdso
+  timespec t;
+  while (state.KeepRunning()) {
+    clock_getres(CLOCK_BOOTTIME, &t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_clock_getres_BOOTTIME);
+
+static void BM_time_gettimeofday(benchmark::State& state) {
   timeval tv;
-  for (int i = 0; i < iters; ++i) {
-    gettimeofday(&tv, NULL);
+  while (state.KeepRunning()) {
+    gettimeofday(&tv, nullptr);
   }
-
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK(BM_time_gettimeofday);
 
-BENCHMARK_NO_ARG(BM_time_gettimeofday_syscall);
-void BM_time_gettimeofday_syscall::Run(int iters) {
-  StartBenchmarkTiming();
-
+void BM_time_gettimeofday_syscall(benchmark::State& state) {
   timeval tv;
-  for (int i = 0; i < iters; ++i) {
-    syscall(__NR_gettimeofday, &tv, NULL);
+  while (state.KeepRunning()) {
+    syscall(__NR_gettimeofday, &tv, nullptr);
   }
-
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK(BM_time_gettimeofday_syscall);
 
-BENCHMARK_NO_ARG(BM_time_time);
-void BM_time_time::Run(int iters) {
-  StartBenchmarkTiming();
-
-  for (int i = 0; i < iters; ++i) {
-    time(NULL);
+void BM_time_time(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    time(nullptr);
   }
-
-  StopBenchmarkTiming();
 }
+BIONIC_BENCHMARK(BM_time_time);
+
+void BM_time_localtime(benchmark::State& state) {
+  time_t t = time(nullptr);
+  while (state.KeepRunning()) {
+    localtime(&t);
+  }
+}
+BIONIC_BENCHMARK(BM_time_localtime);
+
+void BM_time_localtime_r(benchmark::State& state) {
+  time_t t = time(nullptr);
+  while (state.KeepRunning()) {
+    struct tm tm;
+    localtime_r(&t, &tm);
+  }
+}
+BIONIC_BENCHMARK(BM_time_localtime_r);
+
+void BM_time_strftime(benchmark::State& state) {
+  char buf[128];
+  time_t t = 0;
+  struct tm* tm = gmtime(&t);
+  while (state.KeepRunning()) {
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
+  }
+}
+BIONIC_BENCHMARK(BM_time_strftime);

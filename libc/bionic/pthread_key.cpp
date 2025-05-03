@@ -30,6 +30,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
+#include "private/bionic_defs.h"
 #include "private/bionic_tls.h"
 #include "pthread_internal.h"
 
@@ -68,27 +69,38 @@ static inline bool KeyInValidRange(pthread_key_t key) {
   return (key < (KEY_VALID_FLAG | BIONIC_PTHREAD_KEY_COUNT));
 }
 
+static inline pthread_key_data_t* get_thread_key_data() {
+  return __get_bionic_tls().key_data;
+}
+
 // Called from pthread_exit() to remove all pthread keys. This must call the destructor of
 // all keys that have a non-NULL data value and a non-NULL destructor.
 __LIBC_HIDDEN__ void pthread_key_clean_all() {
   // Because destructors can do funky things like deleting/creating other keys,
   // we need to implement this in a loop.
-  pthread_key_data_t* key_data = __get_thread()->key_data;
+  pthread_key_data_t* key_data = get_thread_key_data();
   for (size_t rounds = PTHREAD_DESTRUCTOR_ITERATIONS; rounds > 0; --rounds) {
     size_t called_destructor_count = 0;
     for (size_t i = 0; i < BIONIC_PTHREAD_KEY_COUNT; ++i) {
       uintptr_t seq = atomic_load_explicit(&key_map[i].seq, memory_order_relaxed);
-      if (SeqOfKeyInUse(seq) && seq == key_data[i].seq && key_data[i].data != NULL) {
-        // Other threads may be calling pthread_key_delete/pthread_key_create while current thread
-        // is exiting. So we need to ensure we read the right key_destructor.
+      if (SeqOfKeyInUse(seq) && seq == key_data[i].seq) {
+        // POSIX explicitly says that the destructor is only called if the
+        // thread has a non-null value for the key.
+        if (key_data[i].data == nullptr) {
+          continue;
+        }
+
+        // Other threads can call pthread_key_delete()/pthread_key_create()
+        // while this thread is exiting, so we need to ensure we read the right
+        // key_destructor.
         // We can rely on a user-established happens-before relationship between the creation and
-        // use of pthread key to ensure that we're not getting an earlier key_destructor.
+        // use of a pthread key to ensure that we're not getting an earlier key_destructor.
         // To avoid using the key_destructor of the newly created key in the same slot, we need to
         // recheck the sequence number after reading key_destructor. As a result, we either see the
         // right key_destructor, or the sequence number must have changed when we reread it below.
         key_destructor_t key_destructor = reinterpret_cast<key_destructor_t>(
           atomic_load_explicit(&key_map[i].key_destructor, memory_order_relaxed));
-        if (key_destructor == NULL) {
+        if (key_destructor == nullptr) {
           continue;
         }
         atomic_thread_fence(memory_order_acquire);
@@ -101,8 +113,7 @@ __LIBC_HIDDEN__ void pthread_key_clean_all() {
         // We don't do this if 'key_destructor == NULL' just in case another destructor
         // function is responsible for manually releasing the corresponding data.
         void* data = key_data[i].data;
-        key_data[i].data = NULL;
-
+        key_data[i].data = nullptr;
         (*key_destructor)(data);
         ++called_destructor_count;
       }
@@ -115,6 +126,7 @@ __LIBC_HIDDEN__ void pthread_key_clean_all() {
   }
 }
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int pthread_key_create(pthread_key_t* key, void (*key_destructor)(void*)) {
   for (size_t i = 0; i < BIONIC_PTHREAD_KEY_COUNT; ++i) {
     uintptr_t seq = atomic_load_explicit(&key_map[i].seq, memory_order_relaxed);
@@ -133,6 +145,7 @@ int pthread_key_create(pthread_key_t* key, void (*key_destructor)(void*)) {
 // not call the destructors for non-NULL key values. Instead, it is the
 // responsibility of the caller to properly dispose of the corresponding data
 // and resources, using any means it finds suitable.
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int pthread_key_delete(pthread_key_t key) {
   if (__predict_false(!KeyInValidRange(key))) {
     return EINVAL;
@@ -148,24 +161,26 @@ int pthread_key_delete(pthread_key_t key) {
   return EINVAL;
 }
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 void* pthread_getspecific(pthread_key_t key) {
   if (__predict_false(!KeyInValidRange(key))) {
-    return NULL;
+    return nullptr;
   }
   key &= ~KEY_VALID_FLAG;
   uintptr_t seq = atomic_load_explicit(&key_map[key].seq, memory_order_relaxed);
-  pthread_key_data_t* data = &(__get_thread()->key_data[key]);
-  // It is user's responsibility to synchornize between the creation and use of pthread keys,
+  pthread_key_data_t* data = &get_thread_key_data()[key];
+  // It is the user's responsibility to synchronize between the creation and use of pthread keys,
   // so we use memory_order_relaxed when checking the sequence number.
   if (__predict_true(SeqOfKeyInUse(seq) && data->seq == seq)) {
     return data->data;
   }
-  // We arrive here when current thread holds the seq of an deleted pthread key. So the
-  // data is for the deleted pthread key, and should be cleared.
-  data->data = NULL;
-  return NULL;
+  // We arrive here when the current thread holds the seq of a deleted pthread key.
+  // The data is for the deleted pthread key, and should be cleared.
+  data->data = nullptr;
+  return nullptr;
 }
 
+__BIONIC_WEAK_FOR_NATIVE_BRIDGE
 int pthread_setspecific(pthread_key_t key, const void* ptr) {
   if (__predict_false(!KeyInValidRange(key))) {
     return EINVAL;
@@ -173,7 +188,7 @@ int pthread_setspecific(pthread_key_t key, const void* ptr) {
   key &= ~KEY_VALID_FLAG;
   uintptr_t seq = atomic_load_explicit(&key_map[key].seq, memory_order_relaxed);
   if (__predict_true(SeqOfKeyInUse(seq))) {
-    pthread_key_data_t* data = &(__get_thread()->key_data[key]);
+    pthread_key_data_t* data = &get_thread_key_data()[key];
     data->seq = seq;
     data->data = const_cast<void*>(ptr);
     return 0;

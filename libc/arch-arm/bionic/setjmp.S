@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 1997 Mark Brinicombe
- * Copyright (c) 2010 Android Open Source Project.
+ * Copyright (C) 2010 The Android Open Source Project
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,10 +36,13 @@
 // According to the ARM AAPCS document, we only need to save
 // the following registers:
 //
-//  Core   r4-r14
+//  Core   r4-r11, sp, lr
+//    AAPCS 5.1.1:
+//      A subroutine must preserve the contents of the registers r4-r8, r10, r11
+//      and SP (and r9 in PCS variants that designate r9 as v6).
 //
-//  VFP    d8-d15  (see section 5.1.2.1)
-//
+//  VFP    d8-d15
+//    AAPCS 5.1.2.1:
 //      Registers s16-s31 (d8-d15, q4-q7) must be preserved across subroutine
 //      calls; registers s0-s15 (d0-d7, q0-q3) do not need to be preserved
 //      (and can be used for passing arguments or returning results in standard
@@ -49,60 +52,49 @@
 //  FPSCR  saved because glibc does.
 
 // The internal structure of a jmp_buf is totally private.
-// Current layout (may change in the future):
+// Current layout (changes from release to release):
 //
 // word   name            description
 // 0      sigflag/cookie  setjmp cookie in top 31 bits, signal mask flag in low bit
-// 1      sigmask         signal mask (not used with _setjmp / _longjmp)
-// 2      float_base      base of float registers (d8 to d15)
-// 18     float_state     floating-point status and control register
-// 19     core_base       base of core registers (r4 to r14)
-// 30     reserved        reserved entries (room to grow)
-// 64
-//
-// NOTE: float_base must be at an even word index, since the
-//       FP registers will be loaded/stored with instructions
-//       that expect 8-byte alignment.
+// 1      sigmask         64-bit signal mask (not used with _setjmp / _longjmp)
+// 2      "               "
+// 3      reserved        (unused to allow float_base to be maximally aligned;
+//                        this avoids software emulation of unaligned loads/stores)
+// 4      float_base      base of float registers (d8 to d15)
+// 20     float_state     floating-point status and control register
+// 21     core_base       base of core registers (r4-r11, r13-r14)
+// 31     checksum        checksum of all of the core registers, to give better error messages
+// 32     reserved        reserved entries (room to grow)
+// ...
+// 63     "               "
 
 #define _JB_SIGFLAG     0
-#define _JB_SIGMASK     (_JB_SIGFLAG+1)
-#define _JB_FLOAT_BASE  (_JB_SIGMASK+1)
+#define _JB_SIGMASK     (_JB_SIGFLAG + 1)
+#define _JB_FLOAT_BASE  (_JB_SIGMASK + 3)
 #define _JB_FLOAT_STATE (_JB_FLOAT_BASE + (15-8+1)*2)
 #define _JB_CORE_BASE   (_JB_FLOAT_STATE+1)
+#define _JB_CHECKSUM    (_JB_CORE_BASE+10)
 
-ENTRY(setjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(setjmp)
   mov r1, #1
   b sigsetjmp
 END(setjmp)
 
-ENTRY(_setjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(_setjmp)
   mov r1, #0
   b sigsetjmp
 END(_setjmp)
 
-#define MANGLE_REGISTERS 1
-.macro m_mangle_registers reg
-#if MANGLE_REGISTERS
-  eor r4, r4, \reg
-  eor r5, r5, \reg
-  eor r6, r6, \reg
-  eor r7, r7, \reg
-  eor r8, r8, \reg
-  eor r9, r9, \reg
-  eor r10, r10, \reg
-  eor r11, r11, \reg
-  eor r12, r12, \reg
-  eor r13, r13, \reg
-  eor r14, r14, \reg
-#endif
-.endm
-
-.macro m_unmangle_registers reg
-  m_mangle_registers \reg
+.macro m_calculate_checksum dst, src, scratch
+  mov \dst, #0
+  .irp i,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28
+    ldr \scratch, [\src, #(\i * 4)]
+    eor \dst, \dst, \scratch
+  .endr
 .endm
 
 // int sigsetjmp(sigjmp_buf env, int save_signal_mask);
-ENTRY(sigsetjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(sigsetjmp)
   stmfd sp!, {r0, lr}
   .cfi_def_cfa_offset 8
   .cfi_rel_offset r0, 0
@@ -134,7 +126,7 @@ ENTRY(sigsetjmp)
   add r2, r0, #(_JB_SIGMASK * 4)
   mov r0, #2 // SIG_SETMASK
   mov r1, #0
-  bl sigprocmask
+  bl sigprocmask64
 
   // Unalign the stack.
   add sp, #4
@@ -150,9 +142,30 @@ ENTRY(sigsetjmp)
 
   // Save core registers.
   add r1, r0, #(_JB_CORE_BASE * 4)
-  m_mangle_registers r2
-  stmia r1, {r4-r14}
-  m_unmangle_registers r2
+  // Mangle the easy registers in-place, write them out in one go, and unmangle
+  // them again.
+  eor r4, r4, r2
+  eor r5, r5, r2
+  eor r6, r6, r2
+  eor r7, r7, r2
+  eor r8, r8, r2
+  eor r9, r9, r2
+  eor r10, r10, r2
+  eor r11, r11, r2
+  stmia r1, {r4-r11}
+  eor r4, r4, r2
+  eor r5, r5, r2
+  eor r6, r6, r2
+  eor r7, r7, r2
+  eor r8, r8, r2
+  eor r9, r9, r2
+  eor r10, r10, r2
+  eor r11, r11, r2
+  // We need to avoid invalid values in sp or lr (http://b/152210274).
+  eor r3, lr, r2
+  str r3, [r1, #(8 * 4)]
+  eor r3, sp, r2
+  str r3, [r1, #(9 * 4)]
 
   // Save floating-point registers.
   add r1, r0, #(_JB_FLOAT_BASE * 4)
@@ -162,17 +175,27 @@ ENTRY(sigsetjmp)
   fmrx r1, fpscr
   str r1, [r0, #(_JB_FLOAT_STATE * 4)]
 
+  // Calculate the checksum.
+  m_calculate_checksum r12, r0, r2
+  str r12, [r0, #(_JB_CHECKSUM * 4)]
+
   mov r0, #0
   bx lr
 END(sigsetjmp)
 
 // void siglongjmp(sigjmp_buf env, int value);
-ENTRY(siglongjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(siglongjmp)
   stmfd sp!, {r0, r1, lr}
   .cfi_def_cfa_offset 12
   .cfi_rel_offset r0, 0
   .cfi_rel_offset r1, 4
   .cfi_rel_offset lr, 8
+
+  // Check the checksum before doing anything.
+  m_calculate_checksum r12, r0, r3
+  ldr r2, [r0, #(_JB_CHECKSUM * 4)]
+  teq r2, r12
+  bne __bionic_setjmp_checksum_mismatch
 
   // Fetch the signal flag.
   ldr r1, [r0, #(_JB_SIGFLAG * 4)]
@@ -182,8 +205,10 @@ ENTRY(siglongjmp)
   beq 1f
 
   // Restore the signal mask.
-  ldr r0, [r0, #(_JB_SIGMASK * 4)]
-  bl sigsetmask
+  mov r2, #0
+  add r1, r0, #(_JB_SIGMASK * 4)
+  mov r0, #2 // SIG_SETMASK
+  bl sigprocmask64
 
 1:
   ldmfd sp!, {r0, r1, lr}
@@ -200,12 +225,28 @@ ENTRY(siglongjmp)
   ldr r2, [r0, #(_JB_FLOAT_STATE * 4)]
   fmxr fpscr, r2
 
-  // Restore core registers.
+  // Load the cookie.
   ldr r3, [r0, #(_JB_SIGFLAG * 4)]
   bic r3, r3, #1
+
+  // Restore core registers.
   add r2, r0, #(_JB_CORE_BASE * 4)
-  ldmia r2, {r4-r14}
-  m_unmangle_registers r3
+
+  // Do all the easy registers in one go.
+  ldmia r2, {r4-r11}
+  eor r4, r4, r3
+  eor r5, r5, r3
+  eor r6, r6, r3
+  eor r7, r7, r3
+  eor r8, r8, r3
+  eor r9, r9, r3
+  eor r10, r10, r3
+  eor r11, r11, r3
+  // We need to avoid invalid values in sp or lr (http://b/152210274).
+  ldr r0, [r2, #(8 * 4)]
+  eor lr, r0, r3
+  ldr r0, [r2, #(9 * 4)]
+  eor sp, r0, r3
 
   // Save the return value/address and check the setjmp cookie.
   stmfd sp!, {r1, lr}
@@ -224,5 +265,5 @@ ENTRY(siglongjmp)
   bx lr
 END(siglongjmp)
 
-ALIAS_SYMBOL(longjmp, siglongjmp)
-ALIAS_SYMBOL(_longjmp, siglongjmp)
+ALIAS_SYMBOL_WEAK_FOR_NATIVE_BRIDGE(longjmp, siglongjmp)
+ALIAS_SYMBOL_WEAK_FOR_NATIVE_BRIDGE(_longjmp, siglongjmp)

@@ -21,12 +21,14 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#if defined(__BIONIC__)
+#include "utils.h"
+
 static int child_fn(void* i_ptr) {
   *reinterpret_cast<int*>(i_ptr) = 42;
   return 123;
 }
 
+#if defined(__BIONIC__)
 TEST(sched, clone) {
   void* child_stack[1024];
 
@@ -47,7 +49,7 @@ TEST(sched, clone) {
 // See https://sourceware.org/bugzilla/show_bug.cgi?id=10311 for more details.
 TEST(sched, clone) {
   // In order to enumerate all possible tests for CTS, create an empty test.
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
+  GTEST_SKIP() << "glibc is broken";
 }
 #endif
 
@@ -55,8 +57,16 @@ TEST(sched, clone_errno) {
   // Check that our hand-written clone assembler sets errno correctly on failure.
   uintptr_t fake_child_stack[16];
   errno = 0;
-  ASSERT_EQ(-1, clone(NULL, &fake_child_stack[16], CLONE_THREAD, NULL));
-  ASSERT_EQ(EINVAL, errno);
+  // If CLONE_THREAD is set, CLONE_SIGHAND must be set too.
+  ASSERT_EQ(-1, clone(child_fn, &fake_child_stack[16], CLONE_THREAD, nullptr));
+  ASSERT_ERRNO(EINVAL);
+}
+
+TEST(sched, clone_null_child_stack) {
+  int i = 0;
+  errno = 0;
+  ASSERT_EQ(-1, clone(child_fn, nullptr, CLONE_VM, &i));
+  ASSERT_ERRNO(EINVAL);
 }
 
 TEST(sched, cpu_set) {
@@ -154,7 +164,6 @@ TEST(sched, cpu_op) {
     ASSERT_EQ(i == 0 || i == 1, CPU_ISSET(i, &set3));
   }
 }
-
 
 TEST(sched, cpu_alloc_small) {
   cpu_set_t* set = CPU_ALLOC(17);
@@ -261,4 +270,91 @@ TEST(sched, cpu_equal_s) {
 
   CPU_FREE(set1);
   CPU_FREE(set2);
+}
+
+TEST(sched, sched_get_priority_min_sched_get_priority_max) {
+  EXPECT_LE(sched_get_priority_min(SCHED_BATCH), sched_get_priority_max(SCHED_BATCH));
+  EXPECT_LE(sched_get_priority_min(SCHED_FIFO), sched_get_priority_max(SCHED_FIFO));
+  EXPECT_LE(sched_get_priority_min(SCHED_IDLE), sched_get_priority_max(SCHED_IDLE));
+  EXPECT_LE(sched_get_priority_min(SCHED_OTHER), sched_get_priority_max(SCHED_OTHER));
+  EXPECT_LE(sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR));
+}
+
+TEST(sched, sched_getscheduler_sched_setscheduler) {
+  // POSIX: "If pid is zero, the scheduling policy shall be returned for the
+  // calling process".
+  ASSERT_EQ(sched_getscheduler(getpid()), sched_getscheduler(0));
+
+  const int original_policy = sched_getscheduler(getpid());
+  sched_param p = {};
+  p.sched_priority = sched_get_priority_min(original_policy);
+  errno = 0;
+  ASSERT_EQ(-1, sched_setscheduler(getpid(), INT_MAX, &p));
+  ASSERT_ERRNO(EINVAL);
+
+  ASSERT_EQ(0, sched_getparam(getpid(), &p));
+  ASSERT_EQ(original_policy, sched_setscheduler(getpid(), SCHED_BATCH, &p));
+  // POSIX says this should return the previous policy (here SCHED_BATCH),
+  // but the Linux system call doesn't, and the glibc wrapper doesn't correct
+  // this (the "returns 0" behavior is even documented on the man page in
+  // the BUGS section). This was our historical behavior too, so in the
+  // absence of reasons to break compatibility with ourselves and glibc, we
+  // don't behave as POSIX specifies. http://b/26203902.
+  ASSERT_EQ(0, sched_setscheduler(getpid(), original_policy, &p));
+}
+
+TEST(sched, sched_getaffinity_failure) {
+  // Trivial test of the errno-preserving/returning behavior.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
+  ASSERT_EQ(-1, sched_getaffinity(getpid(), 0, nullptr));
+  ASSERT_ERRNO(EINVAL);
+#pragma clang diagnostic pop
+}
+
+TEST(sched, sched_getaffinity) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  ASSERT_EQ(0, sched_getaffinity(getpid(), sizeof(set), &set));
+  ASSERT_GT(CPU_COUNT(&set), 0);
+}
+
+TEST(sched, sched_setaffinity_failure) {
+  // Trivial test of the errno-preserving/returning behavior.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
+  ASSERT_EQ(-1, sched_setaffinity(getpid(), 0, nullptr));
+  ASSERT_ERRNO(EINVAL);
+#pragma clang diagnostic pop
+}
+
+TEST(sched, sched_setaffinity) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  ASSERT_EQ(0, sched_getaffinity(getpid(), sizeof(set), &set));
+  // It's hard to make any more general claim than this,
+  // but it ought to be safe to ask for the same affinity you already have.
+  ASSERT_EQ(0, sched_setaffinity(getpid(), sizeof(set), &set));
+}
+
+TEST(sched, sched_getattr) {
+#if defined(__BIONIC__)
+  struct sched_attr sa;
+  ASSERT_EQ(0, sched_getattr(getpid(), &sa, sizeof(sa), 0));
+#else
+  GTEST_SKIP() << "our glibc is too old";
+#endif
+}
+
+TEST(sched, sched_setattr_failure) {
+#if defined(__BIONIC__)
+  // Trivial test of the errno-preserving/returning behavior.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
+  ASSERT_EQ(-1, sched_setattr(getpid(), nullptr, 0));
+  ASSERT_ERRNO(EINVAL);
+#pragma clang diagnostic pop
+#else
+  GTEST_SKIP() << "our glibc is too old";
+#endif
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: setenv.c,v 1.14 2012/09/23 16:08:04 jeremy Exp $ */
+/*	$OpenBSD: setenv.c,v 1.20 2022/08/08 22:40:03 millert Exp $ */
 /*
  * Copyright (c) 1987 Regents of the University of California.
  * All rights reserved.
@@ -32,9 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *__findenv(const char *name, int len, int *offset);
-
-extern char **environ;
 static char **lastenv;				/* last value of environ */
 
 /*
@@ -46,14 +43,15 @@ int
 putenv(char *str)
 {
 	char **P, *cp;
-	size_t cnt;
+	size_t cnt = 0;
 	int offset = 0;
 
 	for (cp = str; *cp && *cp != '='; ++cp)
 		;
-	if (*cp != '=') {
+	if (cp == str || *cp != '=') {
+		/* '=' is the first character of string or is missing. */
 		errno = EINVAL;
-		return (-1);			/* missing `=' in string */
+		return (-1);
 	}
 
 	if (__findenv(str, (int)(cp - str), &offset) != NULL) {
@@ -68,19 +66,22 @@ putenv(char *str)
 	}
 
 	/* create new slot for string */
-	for (P = environ; *P != NULL; P++)
-		;
-	cnt = P - environ;
-	P = (char **)realloc(lastenv, sizeof(char *) * (cnt + 2));
+	if (environ != NULL) {
+		for (P = environ; *P != NULL; P++)
+			;
+		cnt = P - environ;
+	}
+	P = reallocarray(lastenv, cnt + 2, sizeof(char *));
 	if (!P)
 		return (-1);
-	if (lastenv != environ)
+	if (lastenv != environ && environ != NULL)
 		memcpy(P, environ, cnt * sizeof(char *));
 	lastenv = environ = P;
 	environ[cnt] = str;
 	environ[cnt + 1] = NULL;
 	return (0);
 }
+DEF_WEAK(putenv);
 
 /*
  * setenv --
@@ -124,22 +125,24 @@ setenv(const char *name, const char *value, int rewrite)
 					break;
 		}
 	} else {					/* create new slot */
-		size_t cnt;
+		size_t cnt = 0;
 
-		for (P = environ; *P != NULL; P++)
-			;
-		cnt = P - environ;
-		P = (char **)realloc(lastenv, sizeof(char *) * (cnt + 2));
+		if (environ != NULL) {
+			for (P = environ; *P != NULL; P++)
+				;
+			cnt = P - environ;
+		}
+		P = reallocarray(lastenv, cnt + 2, sizeof(char *));
 		if (!P)
 			return (-1);
-		if (lastenv != environ)
+		if (lastenv != environ && environ != NULL)
 			memcpy(P, environ, cnt * sizeof(char *));
 		lastenv = environ = P;
 		offset = cnt;
 		environ[cnt + 1] = NULL;
 	}
 	if (!(environ[offset] =			/* name + `=' + value */
-	    malloc((size_t)((int)(np - name) + l_value + 2))))
+	    malloc((int)(np - name) + l_value + 2)))
 		return (-1);
 	for (C = environ[offset]; (*C = *name++) && *C != '='; ++C)
 		;
@@ -147,6 +150,7 @@ setenv(const char *name, const char *value, int rewrite)
 		;
 	return (0);
 }
+DEF_WEAK(setenv);
 
 /*
  * unsetenv(name) --
@@ -178,3 +182,4 @@ unsetenv(const char *name)
 	}
 	return (0);
 }
+DEF_WEAK(unsetenv);

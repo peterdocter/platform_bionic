@@ -1,7 +1,6 @@
 /*	$NetBSD: res_send.c,v 1.9 2006/01/24 17:41:25 christos Exp $	*/
 
 /*
- * Copyright 2008  Android Open Source Project (source port randomization)
  * Copyright (c) 1985, 1989, 1993
  *    The Regents of the University of California.  All rights reserved.
  *
@@ -81,9 +80,6 @@ __RCSID("$NetBSD: res_send.c,v 1.9 2006/01/24 17:41:25 christos Exp $");
 #endif
 #endif /* LIBC_SCCS and not lint */
 
-/* set to 1 to use our small/simple/limited DNS cache */
-#define  USE_RESOLV_CACHE  1
-
 /*
  * Send query to name server and wait for reply.
  */
@@ -101,9 +97,11 @@ __RCSID("$NetBSD: res_send.c,v 1.9 2006/01/24 17:41:25 christos Exp $");
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <poll.h>
 #ifdef ANDROID_CHANGES
 #include "resolv_netid.h"
 #include "resolv_private.h"
+#include "private/android_filesystem_config.h"
 #else
 #include <resolv.h>
 #endif
@@ -116,11 +114,9 @@ __RCSID("$NetBSD: res_send.c,v 1.9 2006/01/24 17:41:25 christos Exp $");
 
 #include <isc/eventlib.h>
 
-#if USE_RESOLV_CACHE
-#  include <resolv_cache.h>
-#endif
+#include <resolv_cache.h>
 
-#include "private/libc_logging.h"
+#include <async_safe/log.h>
 
 #ifndef DE_CONST
 #define DE_CONST(c,v)   v = ((c) ? \
@@ -133,35 +129,27 @@ __RCSID("$NetBSD: res_send.c,v 1.9 2006/01/24 17:41:25 christos Exp $");
 #endif
 #include "res_debug.h"
 #include "res_private.h"
+#include "resolv_stats.h"
 
 #define EXT(res) ((res)->_u._ext)
 #define DBG 0
-
-static const int highestFD = FD_SETSIZE - 1;
 
 /* Forward. */
 
 static int		get_salen __P((const struct sockaddr *));
 static struct sockaddr * get_nsaddr __P((res_state, size_t));
-static int		send_vc(res_state, const u_char *, int,
-				u_char *, int, int *, int);
-static int		send_dg(res_state, const u_char *, int,
-				u_char *, int, int *, int,
-				int *, int *);
+static int		send_vc(res_state, struct __res_params *params, const u_char *, int,
+				u_char *, int, int *, int, time_t *, int *, int *);
+static int		send_dg(res_state, struct __res_params *params, const u_char *, int,
+				u_char *, int, int *, int, int *, int *, time_t *, int *, int *);
 static void		Aerror(const res_state, FILE *, const char *, int,
 			       const struct sockaddr *, int);
 static void		Perror(const res_state, FILE *, const char *, int);
 static int		sock_eq(struct sockaddr *, struct sockaddr *);
-#ifdef NEED_PSELECT
-static int		pselect(int, void *, void *, void *,
-				struct timespec *,
-				const sigset_t *);
-#endif
 void res_pquery(const res_state, const u_char *, int, FILE *);
 static int connect_with_timeout(int sock, const struct sockaddr *nsap,
-			socklen_t salen, int sec);
-static int retrying_select(const int sock, fd_set *readset, fd_set *writeset,
-			const struct timespec *finish);
+			socklen_t salen, const struct timespec timeout);
+static int retrying_poll(const int sock, short events, const struct timespec* finish);
 
 /* BIONIC-BEGIN: implement source port randomization */
 typedef union {
@@ -359,23 +347,13 @@ res_queriesmatch(const u_char *buf1, const u_char *eom1,
 	return (1);
 }
 
-
 int
 res_nsend(res_state statp,
 	  const u_char *buf, int buflen, u_char *ans, int anssiz)
 {
 	int gotsomewhere, terrno, try, v_circuit, resplen, ns, n;
 	char abuf[NI_MAXHOST];
-#if USE_RESOLV_CACHE
-        ResolvCacheStatus     cache_status = RESOLV_CACHE_UNSUPPORTED;
-#endif
-
-#if !USE_RESOLV_CACHE
-	if (statp->nscount == 0) {
-		errno = ESRCH;
-		return (-1);
-	}
-#endif
+	ResolvCacheStatus     cache_status = RESOLV_CACHE_UNSUPPORTED;
 
 	if (anssiz < HFIXEDSZ) {
 		errno = EINVAL;
@@ -387,7 +365,6 @@ res_nsend(res_state statp,
 	gotsomewhere = 0;
 	terrno = ETIMEDOUT;
 
-#if USE_RESOLV_CACHE
 	int  anslen = 0;
 	cache_status = _resolv_cache_lookup(
 			statp->netid, buf, buflen,
@@ -400,7 +377,6 @@ res_nsend(res_state statp,
 		// data so the normal resolve path can do its thing
 		_resolv_populate_res_for_net(statp);
 	}
-
 	if (statp->nscount == 0) {
 		// We have no nameservers configured, so there's no point trying.
 		// Tell the cache the query failed, or any retries and anyone else asking the same
@@ -409,7 +385,6 @@ res_nsend(res_state statp,
 		errno = ESRCH;
 		return (-1);
 	}
-#endif
 
 	/*
 	 * If the ns_addr_list in the resolver context has changed, then
@@ -420,9 +395,9 @@ res_nsend(res_state statp,
 		struct sockaddr_storage peer;
 		socklen_t peerlen;
 
-		if (EXT(statp).nscount != statp->nscount)
+		if (EXT(statp).nscount != statp->nscount) {
 			needclose++;
-		else
+		} else {
 			for (ns = 0; ns < statp->nscount; ns++) {
 				if (statp->nsaddr_list[ns].sin_family &&
 				    !sock_eq((struct sockaddr *)(void *)&statp->nsaddr_list[ns],
@@ -445,6 +420,7 @@ res_nsend(res_state statp,
 					break;
 				}
 			}
+		}
 		if (needclose) {
 			res_nclose(statp);
 			EXT(statp).nscount = 0;
@@ -485,7 +461,7 @@ res_nsend(res_state statp,
 		nstime = EXT(statp).nstimes[0];
 		for (ns = 0; ns < lastns; ns++) {
 			if (EXT(statp).ext != NULL)
-                                EXT(statp).ext->nsaddrs[ns] =
+				EXT(statp).ext->nsaddrs[ns] =
 					EXT(statp).ext->nsaddrs[ns + 1];
 			statp->nsaddr_list[ns] = statp->nsaddr_list[ns + 1];
 			EXT(statp).nssocks[ns] = EXT(statp).nssocks[ns + 1];
@@ -502,13 +478,25 @@ res_nsend(res_state statp,
 	 * Send request, RETRY times, or until successful.
 	 */
 	for (try = 0; try < statp->retry; try++) {
+	    struct __res_stats stats[MAXNS];
+	    struct __res_params params;
+	    int revision_id = _resolv_cache_get_resolver_stats(statp->netid, &params, stats);
+	    bool usable_servers[MAXNS];
+	    android_net_res_stats_get_usable_servers(&params, stats, statp->nscount,
+		    usable_servers);
+
 	    for (ns = 0; ns < statp->nscount; ns++) {
+		if (!usable_servers[ns]) continue;
 		struct sockaddr *nsap;
 		int nsaplen;
+		time_t now = 0;
+		int rcode = RCODE_INTERNAL_ERROR;
+		int delay = 0;
 		nsap = get_nsaddr(statp, (size_t)ns);
 		nsaplen = get_salen(nsap);
 		statp->_flags &= ~RES_F_LASTMASK;
 		statp->_flags |= (ns << RES_F_LASTSHIFT);
+
  same_ns:
 		if (statp->qhook) {
 			int done = 0, loops = 0;
@@ -526,6 +514,10 @@ res_nsend(res_state statp,
 					res_nclose(statp);
 					goto next_ns;
 				case res_done:
+					if (cache_status == RESOLV_CACHE_NOTFOUND) {
+						_resolv_cache_add(statp->netid, buf, buflen,
+								ans, resplen);
+					}
 					return (resplen);
 				case res_modified:
 					/* give the hook another try */
@@ -551,11 +543,23 @@ res_nsend(res_state statp,
 			/* Use VC; at most one attempt per server. */
 			try = statp->retry;
 
-			n = send_vc(statp, buf, buflen, ans, anssiz, &terrno,
-				    ns);
+			n = send_vc(statp, &params, buf, buflen, ans, anssiz, &terrno,
+				    ns, &now, &rcode, &delay);
+
+			/*
+			 * Only record stats the first time we try a query. This ensures that
+			 * queries that deterministically fail (e.g., a name that always returns
+			 * SERVFAIL or times out) do not unduly affect the stats.
+			 */
+			if (try == 0) {
+				struct __res_sample sample;
+				_res_stats_set_sample(&sample, now, rcode, delay);
+				_resolv_cache_add_resolver_stats_sample(statp->netid, revision_id,
+					ns, &sample, params.max_samples);
+			}
 
 			if (DBG) {
-				__libc_format_log(ANDROID_LOG_DEBUG, "libc",
+				async_safe_format_log(ANDROID_LOG_DEBUG, "libc",
 					"used send_vc %d\n", n);
 			}
 
@@ -567,13 +571,22 @@ res_nsend(res_state statp,
 		} else {
 			/* Use datagrams. */
 			if (DBG) {
-				__libc_format_log(ANDROID_LOG_DEBUG, "libc", "using send_dg\n");
+				async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "using send_dg\n");
 			}
 
-			n = send_dg(statp, buf, buflen, ans, anssiz, &terrno,
-				    ns, &v_circuit, &gotsomewhere);
+			n = send_dg(statp, &params, buf, buflen, ans, anssiz, &terrno,
+				    ns, &v_circuit, &gotsomewhere, &now, &rcode, &delay);
+
+			/* Only record stats the first time we try a query. See above. */
+			if (try == 0) {
+				struct __res_sample sample;
+				_res_stats_set_sample(&sample, now, rcode, delay);
+				_resolv_cache_add_resolver_stats_sample(statp->netid, revision_id,
+					ns, &sample, params.max_samples);
+			}
+
 			if (DBG) {
-				__libc_format_log(ANDROID_LOG_DEBUG, "libc", "used send_dg %d\n",n);
+				async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "used send_dg %d\n",n);
 			}
 
 			if (n < 0)
@@ -581,8 +594,8 @@ res_nsend(res_state statp,
 			if (n == 0)
 				goto next_ns;
 			if (DBG) {
-				__libc_format_log(ANDROID_LOG_DEBUG, "libc", "time=%ld\n",
-                                                  time(NULL));
+				async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "time=%ld\n",
+						  time(NULL));
 			}
 			if (v_circuit)
 				goto same_ns;
@@ -599,12 +612,10 @@ res_nsend(res_state statp,
 			(stdout, "%s", ""),
 			ans, (resplen > anssiz) ? anssiz : resplen);
 
-#if USE_RESOLV_CACHE
-                if (cache_status == RESOLV_CACHE_NOTFOUND) {
-                    _resolv_cache_add(statp->netid, buf, buflen,
-                                      ans, resplen);
-                }
-#endif
+		if (cache_status == RESOLV_CACHE_NOTFOUND) {
+		    _resolv_cache_add(statp->netid, buf, buflen,
+				      ans, resplen);
+		}
 		/*
 		 * If we have temporarily opened a virtual circuit,
 		 * or if we haven't been asked to keep a socket open,
@@ -656,15 +667,12 @@ res_nsend(res_state statp,
 	} else
 		errno = terrno;
 
-#if USE_RESOLV_CACHE
-        _resolv_cache_query_failed(statp->netid, buf, buflen);
-#endif
+	_resolv_cache_query_failed(statp->netid, buf, buflen);
 
 	return (-1);
  fail:
-#if USE_RESOLV_CACHE
+
 	_resolv_cache_query_failed(statp->netid, buf, buflen);
-#endif
 	res_nclose(statp);
 	return (-1);
 }
@@ -672,8 +680,7 @@ res_nsend(res_state statp,
 /* Private */
 
 static int
-get_salen(sa)
-	const struct sockaddr *sa;
+get_salen(const struct sockaddr *sa)
 {
 
 #ifdef HAVE_SA_LEN
@@ -694,9 +701,7 @@ get_salen(sa)
  * pick appropriate nsaddr_list for use.  see res_init() for initialization.
  */
 static struct sockaddr *
-get_nsaddr(statp, n)
-	res_state statp;
-	size_t n;
+get_nsaddr(res_state statp, size_t n)
 {
 
 	if (!statp->nsaddr_list[n].sin_family && EXT(statp).ext) {
@@ -716,27 +721,42 @@ get_nsaddr(statp, n)
 	}
 }
 
-static int get_timeout(const res_state statp, const int ns)
+static struct timespec get_timeout(const res_state statp, const struct __res_params* params, const int ns)
 {
-	int timeout = (statp->retrans << ns);
-	if (ns > 0) {
-		timeout /= statp->nscount;
-	}
-	if (timeout <= 0) {
-		timeout = 1;
+	int msec;
+	if (params->base_timeout_msec != 0) {
+		// TODO: scale the timeout by retry attempt and maybe number of servers
+		msec = params->base_timeout_msec;
+	} else {
+		// Legacy algorithm which scales the timeout by nameserver number.
+		// For instance, with 4 nameservers: 5s, 2.5s, 5s, 10s
+		// This has no effect with 1 or 2 nameservers
+		msec = (statp->retrans * 1000) << ns;
+		if (ns > 0) {
+			msec /= statp->nscount;
+		}
+		if (msec < 1000) {
+			msec = 1000;  // Use at least 100ms
+		}
 	}
 	if (DBG) {
-		__libc_format_log(ANDROID_LOG_DEBUG, "libc", "using timeout of %d sec\n", timeout);
+		async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "using timeout of %d msec\n", msec);
 	}
 
-	return timeout;
+	struct timespec result;
+	result.tv_sec = msec / 1000;
+	result.tv_nsec = (msec % 1000) * 1000000;
+	return result;
 }
 
 static int
-send_vc(res_state statp,
+send_vc(res_state statp, struct __res_params* params,
 	const u_char *buf, int buflen, u_char *ans, int anssiz,
-	int *terrno, int ns)
+	int *terrno, int ns, time_t* at, int* rcode, int* delay)
 {
+	*at = time(NULL);
+	*rcode = RCODE_INTERNAL_ERROR;
+	*delay = 0;
 	const HEADER *hp = (const HEADER *)(const void *)buf;
 	HEADER *anhp = (HEADER *)(void *)ans;
 	struct sockaddr *nsap;
@@ -748,7 +768,7 @@ send_vc(res_state statp,
 	void *tmp;
 
 	if (DBG) {
-		__libc_format_log(ANDROID_LOG_DEBUG, "libc", "using send_vc\n");
+		async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "using send_vc\n");
 	}
 
 	nsap = get_nsaddr(statp, (size_t)ns);
@@ -757,6 +777,8 @@ send_vc(res_state statp,
 	connreset = 0;
  same_ns:
 	truncating = 0;
+
+	struct timespec now = evNowTime();
 
 	/* Are we still talking to whom we want to talk to? */
 	if (statp->_vcsock >= 0 && (statp->_flags & RES_F_VC) != 0) {
@@ -779,10 +801,6 @@ send_vc(res_state statp,
 			res_nclose(statp);
 
 		statp->_vcsock = socket(nsap->sa_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
-		if (statp->_vcsock > highestFD) {
-			res_nclose(statp);
-			errno = ENOTSOCK;
-		}
 		if (statp->_vcsock < 0) {
 			switch (errno) {
 			case EPROTONOSUPPORT:
@@ -798,9 +816,10 @@ send_vc(res_state statp,
 				return (-1);
 			}
 		}
+		fchown(statp->_vcsock, AID_DNS, -1);
 		if (statp->_mark != MARK_UNSET) {
 			if (setsockopt(statp->_vcsock, SOL_SOCKET,
-				        SO_MARK, &statp->_mark, sizeof(statp->_mark)) < 0) {
+				    SO_MARK, &statp->_mark, sizeof(statp->_mark)) < 0) {
 				*terrno = errno;
 				Perror(statp, stderr, "setsockopt", errno);
 				return -1;
@@ -815,11 +834,20 @@ send_vc(res_state statp,
 			return (0);
 		}
 		if (connect_with_timeout(statp->_vcsock, nsap, (socklen_t)nsaplen,
-				get_timeout(statp, ns)) < 0) {
+				get_timeout(statp, params, ns)) < 0) {
 			*terrno = errno;
 			Aerror(statp, stderr, "connect/vc", errno, nsap,
 			    nsaplen);
 			res_nclose(statp);
+			/*
+			 * The way connect_with_timeout() is implemented prevents us from reliably
+			 * determining whether this was really a timeout or e.g. ECONNREFUSED. Since
+			 * currently both cases are handled in the same way, there is no need to
+			 * change this (yet). If we ever need to reliably distinguish between these
+			 * cases, both connect_with_timeout() and retrying_poll() need to be
+			 * modified, though.
+			 */
+			*rcode = RCODE_TIMEOUT;
 			return (0);
 		}
 		statp->_flags |= RES_F_VC;
@@ -900,6 +928,7 @@ send_vc(res_state statp,
 		res_nclose(statp);
 		return (0);
 	}
+
 	if (truncating) {
 		/*
 		 * Flush rest of answer so connection stays in synch.
@@ -916,6 +945,8 @@ send_vc(res_state statp,
 			else
 				break;
 		}
+		// return size should never exceed container size
+		resplen = anssiz;
 	}
 	/*
 	 * If the calling applicating has bailed out of
@@ -928,7 +959,7 @@ send_vc(res_state statp,
 		DprintQ((statp->options & RES_DEBUG) ||
 			(statp->pfcode & RES_PRF_REPLY),
 			(stdout, ";; old answer (unexpected):\n"),
-			ans, (resplen > anssiz) ? anssiz: resplen);
+			ans, resplen);
 		goto read_len;
 	}
 
@@ -936,79 +967,70 @@ send_vc(res_state statp,
 	 * All is well, or the error is fatal.  Signal that the
 	 * next nameserver ought not be tried.
 	 */
+	if (resplen > 0) {
+	    struct timespec done = evNowTime();
+	    *delay = _res_stats_calculate_rtt(&done, &now);
+	    *rcode = anhp->rcode;
+	}
 	return (resplen);
 }
 
 /* return -1 on error (errno set), 0 on success */
 static int
-connect_with_timeout(int sock, const struct sockaddr *nsap, socklen_t salen, int sec)
+connect_with_timeout(int sock, const struct sockaddr *nsap, socklen_t salen,
+	const struct timespec timeout)
 {
 	int res, origflags;
-	fd_set rset, wset;
-	struct timespec now, timeout, finish;
 
 	origflags = fcntl(sock, F_GETFL, 0);
 	fcntl(sock, F_SETFL, origflags | O_NONBLOCK);
 
 	res = __connect(sock, nsap, salen);
 	if (res < 0 && errno != EINPROGRESS) {
-                res = -1;
-                goto done;
+		res = -1;
+		goto done;
 	}
 	if (res != 0) {
-		now = evNowTime();
-		timeout = evConsTime((long)sec, 0L);
-		finish = evAddTime(now, timeout);
+		struct timespec now = evNowTime();
+		struct timespec finish = evAddTime(now, timeout);
 		if (DBG) {
-			__libc_format_log(ANDROID_LOG_DEBUG, "libc", "  %d send_vc\n", sock);
+			async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "  %d send_vc\n", sock);
 		}
 
-		res = retrying_select(sock, &rset, &wset, &finish);
+		res = retrying_poll(sock, POLLIN | POLLOUT, &finish);
 		if (res <= 0) {
-                        res = -1;
+			res = -1;
 		}
 	}
 done:
 	fcntl(sock, F_SETFL, origflags);
 	if (DBG) {
-		__libc_format_log(ANDROID_LOG_DEBUG, "libc",
-			"  %d connect_with_timeout returning %d\n", sock, res);
+		async_safe_format_log(ANDROID_LOG_DEBUG, "libc",
+			"  %d connect_with_const timeout returning %d\n", sock, res);
 	}
 	return res;
 }
 
 static int
-retrying_select(const int sock, fd_set *readset, fd_set *writeset, const struct timespec *finish)
-{
+retrying_poll(const int sock, const short events, const struct timespec* finish) {
 	struct timespec now, timeout;
-	int n, error;
-	socklen_t len;
-
 
 retry:
 	if (DBG) {
-		__libc_format_log(ANDROID_LOG_DEBUG, "libc", "  %d retying_select\n", sock);
+		async_safe_format_log(ANDROID_LOG_DEBUG, "libc", "  %d retrying_poll\n", sock);
 	}
 
 	now = evNowTime();
-	if (readset) {
-		FD_ZERO(readset);
-		FD_SET(sock, readset);
-	}
-	if (writeset) {
-		FD_ZERO(writeset);
-		FD_SET(sock, writeset);
-	}
 	if (evCmpTime(*finish, now) > 0)
 		timeout = evSubTime(*finish, now);
 	else
 		timeout = evConsTime(0L, 0L);
-
-	n = pselect(sock + 1, readset, writeset, NULL, &timeout, NULL);
+	struct pollfd fds = { .fd = sock, .events = events };
+	int n = ppoll(&fds, 1, &timeout, /*sigmask=*/NULL);
 	if (n == 0) {
 		if (DBG) {
-			__libc_format_log(ANDROID_LOG_DEBUG, " libc",
-				"  %d retrying_select timeout\n", sock);
+			async_safe_format_log(ANDROID_LOG_DEBUG, "libc",
+				"  %d retrying_poll timeout\n", sock);
 		}
 		errno = ETIMEDOUT;
 		return 0;
@@ -1017,55 +1039,54 @@ retry:
 		if (errno == EINTR)
 			goto retry;
 		if (DBG) {
-			__libc_format_log(ANDROID_LOG_DEBUG, "libc",
-				"  %d retrying_select got error %d\n",sock, n);
+			async_safe_format_log(ANDROID_LOG_DEBUG, "libc",
+				"  %d retrying_poll got error %d\n",sock, n);
 		}
 		return n;
 	}
-	if ((readset && FD_ISSET(sock, readset)) || (writeset && FD_ISSET(sock, writeset))) {
-		len = sizeof(error);
+	if (fds.revents & (POLLIN | POLLOUT | POLLERR)) {
+		int error;
+		socklen_t len = sizeof(error);
 		if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error) {
 			errno = error;
 			if (DBG) {
-				__libc_format_log(ANDROID_LOG_DEBUG, "libc",
-					"  %d retrying_select dot error2 %d\n", sock, errno);
+				async_safe_format_log(ANDROID_LOG_DEBUG, "libc",
+					"  %d retrying_poll dot error2 %d\n", sock, errno);
 			}
 
 			return -1;
 		}
 	}
 	if (DBG) {
-		__libc_format_log(ANDROID_LOG_DEBUG, "libc",
-			"  %d retrying_select returning %d\n",sock, n);
+		async_safe_format_log(ANDROID_LOG_DEBUG, "libc",
+			"  %d retrying_poll returning %d\n",sock, n);
 	}
 
 	return n;
 }
 
-
 static int
-send_dg(res_state statp,
+send_dg(res_state statp, struct __res_params* params,
 	const u_char *buf, int buflen, u_char *ans, int anssiz,
-	int *terrno, int ns, int *v_circuit, int *gotsomewhere)
+	int *terrno, int ns, int *v_circuit, int *gotsomewhere,
+	time_t *at, int *rcode, int* delay)
 {
+	*at = time(NULL);
+	*rcode = RCODE_INTERNAL_ERROR;
+	*delay = 0;
 	const HEADER *hp = (const HEADER *)(const void *)buf;
 	HEADER *anhp = (HEADER *)(void *)ans;
 	const struct sockaddr *nsap;
 	int nsaplen;
-	struct timespec now, timeout, finish;
-	fd_set dsmask;
+	struct timespec now, timeout, finish, done;
 	struct sockaddr_storage from;
 	socklen_t fromlen;
-	int resplen, seconds, n, s;
+	int resplen, n, s;
 
 	nsap = get_nsaddr(statp, (size_t)ns);
 	nsaplen = get_salen(nsap);
 	if (EXT(statp).nssocks[ns] == -1) {
 		EXT(statp).nssocks[ns] = socket(nsap->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-		if (EXT(statp).nssocks[ns] > highestFD) {
-			res_nclose(statp);
-			errno = ENOTSOCK;
-		}
 		if (EXT(statp).nssocks[ns] < 0) {
 			switch (errno) {
 			case EPROTONOSUPPORT:
@@ -1082,6 +1103,7 @@ send_dg(res_state statp,
 			}
 		}
 
+		fchown(EXT(statp).nssocks[ns], AID_DNS, -1);
 		if (statp->_mark != MARK_UNSET) {
 			if (setsockopt(EXT(statp).nssocks[ns], SOL_SOCKET,
 					SO_MARK, &(statp->_mark), sizeof(statp->_mark)) < 0) {
@@ -1137,20 +1159,20 @@ send_dg(res_state statp,
 	/*
 	 * Wait for reply.
 	 */
-	seconds = get_timeout(statp, ns);
+	timeout = get_timeout(statp, params, ns);
 	now = evNowTime();
-	timeout = evConsTime((long)seconds, 0L);
 	finish = evAddTime(now, timeout);
 retry:
-	n = retrying_select(s, &dsmask, NULL, &finish);
+	n = retrying_poll(s, POLLIN, &finish);
 
 	if (n == 0) {
+		*rcode = RCODE_TIMEOUT;
 		Dprint(statp->options & RES_DEBUG, (stdout, ";; timeout\n"));
 		*gotsomewhere = 1;
 		return (0);
 	}
 	if (n < 0) {
-		Perror(statp, stderr, "select", errno);
+		Perror(statp, stderr, "poll", errno);
 		res_nclose(statp);
 		return (0);
 	}
@@ -1181,9 +1203,6 @@ retry:
 		 * XXX - potential security hazard could
 		 *	 be detected here.
 		 */
-#ifdef ANDROID_CHANGES
-		__libc_android_log_event_uid(BIONIC_EVENT_RESOLVER_OLD_RESPONSE);
-#endif
 		DprintQ((statp->options & RES_DEBUG) ||
 			(statp->pfcode & RES_PRF_REPLY),
 			(stdout, ";; old answer:\n"),
@@ -1197,9 +1216,6 @@ retry:
 		 * XXX - potential security hazard could
 		 *	 be detected here.
 		 */
-#ifdef ANDROID_CHANGES
-		__libc_android_log_event_uid(BIONIC_EVENT_RESOLVER_WRONG_SERVER);
-#endif
 		DprintQ((statp->options & RES_DEBUG) ||
 			(statp->pfcode & RES_PRF_REPLY),
 			(stdout, ";; not our server:\n"),
@@ -1230,15 +1246,14 @@ retry:
 		 * XXX - potential security hazard could
 		 *	 be detected here.
 		 */
-#ifdef ANDROID_CHANGES
-		__libc_android_log_event_uid(BIONIC_EVENT_RESOLVER_WRONG_QUERY);
-#endif
 		DprintQ((statp->options & RES_DEBUG) ||
 			(statp->pfcode & RES_PRF_REPLY),
 			(stdout, ";; wrong query name:\n"),
 			ans, (resplen > anssiz) ? anssiz : resplen);
 		goto retry;;
 	}
+	done = evNowTime();
+	*delay = _res_stats_calculate_rtt(&done, &now);
 	if (anhp->rcode == SERVFAIL ||
 	    anhp->rcode == NOTIMP ||
 	    anhp->rcode == REFUSED) {
@@ -1247,8 +1262,10 @@ retry:
 			ans, (resplen > anssiz) ? anssiz : resplen);
 		res_nclose(statp);
 		/* don't retry if called from dig */
-		if (!statp->pfcode)
+		if (!statp->pfcode) {
+			*rcode = anhp->rcode;
 			return (0);
+		}
 	}
 	if (!(statp->options & RES_IGNTC) && anhp->tc) {
 		/*
@@ -1265,6 +1282,9 @@ retry:
 	 * All is well, or the error is fatal.  Signal that the
 	 * next nameserver ought not be tried.
 	 */
+	if (resplen > 0) {
+		*rcode = anhp->rcode;
+	}
 	return (resplen);
 }
 
@@ -1325,29 +1345,3 @@ sock_eq(struct sockaddr *a, struct sockaddr *b) {
 		return 0;
 	}
 }
-
-#ifdef NEED_PSELECT
-/* XXX needs to move to the porting library. */
-static int
-pselect(int nfds, void *rfds, void *wfds, void *efds,
-	struct timespec *tsp, const sigset_t *sigmask)
-{
-	struct timeval tv, *tvp;
-	sigset_t sigs;
-	int n;
-
-	if (tsp) {
-		tvp = &tv;
-		tv = evTimeVal(*tsp);
-	} else
-		tvp = NULL;
-	if (sigmask)
-		sigprocmask(SIG_SETMASK, sigmask, &sigs);
-	n = select(nfds, rfds, wfds, efds, tvp);
-	if (sigmask)
-		sigprocmask(SIG_SETMASK, &sigs, NULL);
-	if (tsp)
-		*tsp = evTimeSpec(tv);
-	return (n);
-}
-#endif

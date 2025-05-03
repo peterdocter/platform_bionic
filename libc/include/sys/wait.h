@@ -25,10 +25,12 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef _SYS_WAIT_H_
-#define _SYS_WAIT_H_
+
+#pragma once
 
 #include <sys/cdefs.h>
+
+#include <bits/wait.h>
 #include <sys/types.h>
 #include <sys/resource.h>
 #include <linux/wait.h>
@@ -36,22 +38,9 @@
 
 __BEGIN_DECLS
 
-#define WEXITSTATUS(s)  (((s) & 0xff00) >> 8)
-#define WCOREDUMP(s)    ((s) & 0x80)
-#define WTERMSIG(s)     ((s) & 0x7f)
-#define WSTOPSIG(s)     WEXITSTATUS(s)
-
-#define WIFEXITED(s)    (WTERMSIG(s) == 0)
-#define WIFSTOPPED(s)   (WTERMSIG(s) == 0x7f)
-#define WIFSIGNALED(s)  (WTERMSIG((s)+1) >= 2)
-#define WIFCONTINUED(s) ((s) == 0xffff)
-
-#define W_EXITCODE(ret, sig)    ((ret) << 8 | (sig))
-#define W_STOPCODE(sig)         ((sig) << 8 | 0x7f)
-
-extern pid_t  wait(int *);
-extern pid_t  waitpid(pid_t, int *, int);
-extern pid_t  wait4(pid_t, int *, int, struct rusage *);
+pid_t wait(int* _Nullable __status);
+pid_t waitpid(pid_t __pid, int* _Nullable __status, int __options);
+pid_t wait4(pid_t __pid, int* _Nullable __status, int __options, struct rusage* _Nullable __rusage);
 
 /* Posix states that idtype_t should be an enumeration type, but
  * the kernel headers define P_ALL, P_PID and P_PGID as constant macros
@@ -59,8 +48,6 @@ extern pid_t  wait4(pid_t, int *, int, struct rusage *);
  */
 typedef int idtype_t;
 
-extern int  waitid(idtype_t which, id_t id, siginfo_t *info, int options);
+int waitid(idtype_t __type, id_t __id, siginfo_t* _Nullable __info, int __options);
 
 __END_DECLS
-
-#endif /* _SYS_WAIT_H_ */

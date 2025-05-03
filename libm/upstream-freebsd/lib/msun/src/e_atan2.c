@@ -1,5 +1,4 @@
 
-/* @(#)e_atan2.c 1.3 95/01/18 */
 /*
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -12,10 +11,7 @@
  *
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
-/* __ieee754_atan2(y,x)
+/* atan2(y,x)
  * Method :
  *	1. Reduce y to positive by atan2(y,x)=-atan2(-y,x).
  *	2. Reduce x to positive by (if x and y are unexceptional): 
@@ -58,7 +54,7 @@ static volatile double
 pi_lo   = 1.2246467991473531772E-16; /* 0x3CA1A626, 0x33145C07 */
 
 double
-__ieee754_atan2(double y, double x)
+atan2(double y, double x)
 {
 	double z;
 	int32_t k,m,hx,hy,ix,iy;
@@ -70,8 +66,8 @@ __ieee754_atan2(double y, double x)
 	iy = hy&0x7fffffff;
 	if(((ix|((lx|-lx)>>31))>0x7ff00000)||
 	   ((iy|((ly|-ly)>>31))>0x7ff00000))	/* x or y is NaN */
-	   return x+y;
-	if((hx-0x3ff00000|lx)==0) return atan(y);   /* x=1.0 */
+	    return nan_mix(x, y);
+	if(hx==0x3ff00000&&lx==0) return atan(y);   /* x=1.0 */
 	m = ((hy>>31)&1)|((hx>>30)&2);	/* 2*sign(x)+sign(y) */
 
     /* when y = 0 */

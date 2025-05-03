@@ -1,4 +1,3 @@
-/* @(#)e_fmod.c 1.3 95/01/18 */
 /*-
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -9,9 +8,6 @@
  * is preserved.
  * ====================================================
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 #include <float.h>
 #include <stdint.h>
@@ -79,7 +75,7 @@ fmodl(long double x, long double y)
 	   (ux.bits.exp == BIAS + LDBL_MAX_EXP) ||	 /* or x not finite */
 	   (uy.bits.exp == BIAS + LDBL_MAX_EXP &&
 	    ((uy.bits.manh&~LDBL_NBIT)|uy.bits.manl)!=0)) /* or y is NaN */
-	    return (x*y)/(x*y);
+	    return nan_mix_op(x, y, *)/nan_mix_op(x, y, *);
 	if(ux.bits.exp<=uy.bits.exp) {
 	    if((ux.bits.exp<uy.bits.exp) ||
 	       (ux.bits.manh<=uy.bits.manh &&

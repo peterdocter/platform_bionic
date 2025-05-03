@@ -26,32 +26,33 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _NETINET_IN_H_
-#define _NETINET_IN_H_
+#pragma once
+
+#include <sys/cdefs.h>
 
 #include <endian.h>
 #include <netinet/in6.h>
-#include <sys/cdefs.h>
 #include <sys/socket.h>
 
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/ipv6.h>
+#include <linux/socket.h>
 
 __BEGIN_DECLS
-
-#define IPPORT_RESERVED  1024
 
 #define INET_ADDRSTRLEN 16
 
 typedef uint16_t in_port_t;
-typedef uint32_t in_addr_t;
 
-extern int bindresvport (int sd, struct sockaddr_in *sin);
+int bindresvport(int __fd, struct sockaddr_in* _Nullable __sin);
 
+#if __ANDROID_API__ >= 24
+extern const struct in6_addr in6addr_any __INTRODUCED_IN(24);
+extern const struct in6_addr in6addr_loopback __INTRODUCED_IN(24);
+#else
 static const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
 static const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
+#endif
 
 __END_DECLS
-
-#endif /* _NETINET_IN_H_ */

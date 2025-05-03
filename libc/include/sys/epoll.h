@@ -26,59 +26,90 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _SYS_EPOLL_H_
-#define _SYS_EPOLL_H_
+#pragma once
+
+/**
+ * @file sys/epoll.h
+ * @brief I/O event file descriptors.
+ */
 
 #include <sys/cdefs.h>
 #include <sys/types.h>
-#include <fcntl.h> /* For O_CLOEXEC. */
 #include <signal.h> /* For sigset_t. */
+
+#include <linux/eventpoll.h>
 
 __BEGIN_DECLS
 
-#define EPOLLIN          0x00000001
-#define EPOLLPRI         0x00000002
-#define EPOLLOUT         0x00000004
-#define EPOLLERR         0x00000008
-#define EPOLLHUP         0x00000010
-#define EPOLLRDNORM      0x00000040
-#define EPOLLRDBAND      0x00000080
-#define EPOLLWRNORM      0x00000100
-#define EPOLLWRBAND      0x00000200
-#define EPOLLMSG         0x00000400
-#define EPOLLRDHUP       0x00002000
-#define EPOLLWAKEUP      0x20000000
-#define EPOLLONESHOT     0x40000000
-#define EPOLLET          0x80000000
+/**
+ * [epoll_create(2)](https://man7.org/linux/man-pages/man2/epoll_create.2.html)
+ * creates a new [epoll](https://man7.org/linux/man-pages/man7/epoll.7.html)
+ * file descriptor.
+ *
+ * Returns a new file descriptor on success and returns -1 and sets `errno` on
+ * failure.
+ */
+int epoll_create(int __size);
 
-#define EPOLL_CTL_ADD    1
-#define EPOLL_CTL_DEL    2
-#define EPOLL_CTL_MOD    3
+/**
+ * [epoll_create1(2)](https://man7.org/linux/man-pages/man2/epoll_create1.2.html)
+ * creates a new [epoll](https://man7.org/linux/man-pages/man7/epoll.7.html)
+ * file descriptor with the given flags.
+ *
+ * Returns a new file descriptor on success and returns -1 and sets `errno` on
+ * failure.
+ */
+int epoll_create1(int __flags);
 
-#define EPOLL_CLOEXEC O_CLOEXEC
+/**
+ * [epoll_ctl(2)](https://man7.org/linux/man-pages/man2/epoll_ctl.2.html)
+ * adds/modifies/removes file descriptors from the given epoll file descriptor.
+ *
+ * Returns 0 on success and returns -1 and sets `errno` on failure.
+ */
+int epoll_ctl(int __epoll_fd, int __op, int __fd, struct epoll_event* __BIONIC_COMPLICATED_NULLNESS __event);
 
-typedef union epoll_data {
-  void* ptr;
-  int fd;
-  uint32_t u32;
-  uint64_t u64;
-} epoll_data_t;
+/**
+ * [epoll_wait(2)](https://man7.org/linux/man-pages/man2/epoll_wait.2.html)
+ * waits for an event on the given epoll file descriptor.
+ *
+ * Returns the number of ready file descriptors on success, 0 on timeout,
+ * or -1 and sets `errno` on failure.
+ */
+int epoll_wait(int __epoll_fd, struct epoll_event* _Nonnull __events, int __event_count, int __timeout_ms);
 
-struct epoll_event {
-  uint32_t events;
-  epoll_data_t data;
-}
-#ifdef __x86_64__
-__packed
-#endif
-;
+/**
+ * Like epoll_wait() but atomically applying the given signal mask.
+ */
+int epoll_pwait(int __epoll_fd, struct epoll_event* _Nonnull __events, int __event_count, int __timeout_ms, const sigset_t* _Nullable __mask);
 
-int epoll_create(int);
-int epoll_create1(int);
-int epoll_ctl(int, int, int, struct epoll_event*);
-int epoll_wait(int, struct epoll_event*, int, int);
-int epoll_pwait(int, struct epoll_event*, int, int, const sigset_t*);
+/**
+ * Like epoll_pwait() but using a 64-bit signal mask even on 32-bit systems.
+ *
+ * Available since API level 28.
+ */
+
+#if __BIONIC_AVAILABILITY_GUARD(28)
+int epoll_pwait64(int __epoll_fd, struct epoll_event* _Nonnull __events, int __event_count, int __timeout_ms, const sigset64_t* _Nullable __mask) __INTRODUCED_IN(28);
+#endif /* __BIONIC_AVAILABILITY_GUARD(28) */
+
+
+/**
+ * Like epoll_pwait() but with a `struct timespec` timeout, for nanosecond resolution.
+ *
+ * Available since API level 35.
+ */
+
+#if __BIONIC_AVAILABILITY_GUARD(35)
+int epoll_pwait2(int __epoll_fd, struct epoll_event* _Nonnull __events, int __event_count, const struct timespec* _Nullable __timeout, const sigset_t* _Nullable __mask) __INTRODUCED_IN(35);
+
+/**
+ * Like epoll_pwait2() but using a 64-bit signal mask even on 32-bit systems.
+ *
+ * Available since API level 35.
+ */
+int epoll_pwait2_64(int __epoll_fd, struct epoll_event* _Nonnull __events, int __event_count, const struct timespec* _Nullable __timeout, const sigset64_t* _Nullable __mask) __INTRODUCED_IN(35);
+#endif /* __BIONIC_AVAILABILITY_GUARD(35) */
+
 
 __END_DECLS
-
-#endif  /* _SYS_EPOLL_H_ */

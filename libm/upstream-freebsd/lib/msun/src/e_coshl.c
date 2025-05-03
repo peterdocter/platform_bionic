@@ -11,9 +11,6 @@
  * ====================================================
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 /*
  * See e_cosh.c for complete comments.
  *
@@ -86,7 +83,9 @@ long double
 coshl(long double x)
 {
 	long double hi,lo,x2,x4;
+#if LDBL_MANT_DIG == 113
 	double dx2;
+#endif
 	uint16_t ix;
 
 	GET_LDBL_EXPSIGN(ix,x);

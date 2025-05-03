@@ -26,8 +26,12 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _POLL_H_
-#define _POLL_H_
+#pragma once
+
+/**
+ * @file poll.h
+ * @brief Wait for events on a set of file descriptors.
+ */
 
 #include <sys/cdefs.h>
 #include <linux/poll.h>
@@ -36,55 +40,40 @@
 
 __BEGIN_DECLS
 
+/** The type of a file descriptor count, used by poll() and ppoll(). */
 typedef unsigned int nfds_t;
 
-int poll(struct pollfd*, nfds_t, int);
-int ppoll(struct pollfd*, nfds_t, const struct timespec*, const sigset_t*);
+/**
+ * [poll(3)](https://man7.org/linux/man-pages/man3/poll.3.html) waits on a set of file descriptors.
+ *
+ * Returns the number of ready file descriptors on success, 0 for timeout,
+ * and returns -1 and sets `errno` on failure.
+ */
+int poll(struct pollfd* _Nullable __fds, nfds_t __count, int __timeout_ms);
 
-int __poll_chk(struct pollfd*, nfds_t, int, size_t);
-int __poll_real(struct pollfd*, nfds_t, int) __RENAME(poll);
-__errordecl(__poll_too_small_error, "poll: pollfd array smaller than fd count");
+/**
+ * [ppoll(3)](https://man7.org/linux/man-pages/man3/ppoll.3.html) waits on a set of file descriptors
+ * or a signal. Set `__timeout` to null for no timeout. Set `__mask` to null to not set the signal
+ * mask.
+ *
+ * Returns the number of ready file descriptors on success, 0 for timeout,
+ * and returns -1 and sets `errno` on failure.
+ */
+int ppoll(struct pollfd* _Nullable __fds, nfds_t __count, const struct timespec* _Nullable __timeout, const sigset_t* _Nullable __mask);
 
-int __ppoll_chk(struct pollfd*, nfds_t, const struct timespec*, const sigset_t*, size_t);
-int __ppoll_real(struct pollfd*, nfds_t, const struct timespec*, const sigset_t*) __RENAME(ppoll);
-__errordecl(__ppoll_too_small_error, "ppoll: pollfd array smaller than fd count");
+/**
+ * Like ppoll() but allows setting a signal mask with RT signals even from a 32-bit process.
+ */
 
-#if defined(__BIONIC_FORTIFY)
+#if __BIONIC_AVAILABILITY_GUARD(28)
+int ppoll64(struct pollfd* _Nullable  __fds, nfds_t __count, const struct timespec* _Nullable __timeout, const sigset64_t* _Nullable __mask) __INTRODUCED_IN(28);
+#endif /* __BIONIC_AVAILABILITY_GUARD(28) */
 
-__BIONIC_FORTIFY_INLINE
-int poll(struct pollfd* fds, nfds_t fd_count, int timeout) {
-#if defined(__clang__)
-  return __poll_chk(fds, fd_count, timeout, __bos(fds));
-#else
-  if (__bos(fds) != __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-    if (!__builtin_constant_p(fd_count)) {
-      return __poll_chk(fds, fd_count, timeout, __bos(fds));
-    } else if (__bos(fds) / sizeof(*fds) < fd_count) {
-      __poll_too_small_error();
-    }
-  }
-  return __poll_real(fds, fd_count, timeout);
-#endif
-}
 
-__BIONIC_FORTIFY_INLINE
-int ppoll(struct pollfd* fds, nfds_t fd_count, const struct timespec* timeout, const sigset_t* mask) {
-#if defined(__clang__)
-  return __ppoll_chk(fds, fd_count, timeout, mask, __bos(fds));
-#else
-  if (__bos(fds) != __BIONIC_FORTIFY_UNKNOWN_SIZE) {
-    if (!__builtin_constant_p(fd_count)) {
-      return __ppoll_chk(fds, fd_count, timeout, mask, __bos(fds));
-    } else if (__bos(fds) / sizeof(*fds) < fd_count) {
-      __ppoll_too_small_error();
-    }
-  }
-  return __ppoll_real(fds, fd_count, timeout, mask);
-#endif
-}
-
+#if defined(__BIONIC_INCLUDE_FORTIFY_HEADERS)
+#define _POLL_H_
+#include <bits/fortify/poll.h>
+#undef _POLL_H_
 #endif
 
 __END_DECLS
-
-#endif /* _POLL_H_ */

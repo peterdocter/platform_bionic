@@ -36,29 +36,77 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _STRINGS_H_
-#define _STRINGS_H_
+#pragma once
+
+/**
+ * @file strings.h
+ * @brief Extra string functions.
+ */
+
+#include <sys/cdefs.h>
 
 #include <sys/types.h>
-#include <sys/cdefs.h>
 #include <xlocale.h>
 
-__BEGIN_DECLS
-#if defined(__BIONIC_FORTIFY)
-#define bcopy(b1, b2, len) (void)(__builtin___memmove_chk((b2), (b1), (len), __bos0(b2)))
-#define bzero(b, len) (void)(__builtin___memset_chk((b), '\0', (len), __bos0(b)))
-#else
-#define bcopy(b1, b2, len) (void)(__builtin_memmove((b2), (b1), (len)))
-#define bzero(b, len) (void)(__builtin_memset((b), '\0', (len)))
+#include <bits/strcasecmp.h>
+
+#if !defined(__BIONIC_STRINGS_INLINE)
+#define __BIONIC_STRINGS_INLINE static __inline
 #endif
 
-int ffs(int);
+#undef ffs
+#undef ffsl
+#undef ffsll
 
-int strcasecmp(const char*, const char*) __purefunc;
-int strcasecmp_l(const char*, const char*, locale_t) __purefunc;
-int strncasecmp(const char*, const char*, size_t) __purefunc;
-int strncasecmp_l(const char*, const char*, size_t, locale_t) __purefunc;
+__BEGIN_DECLS
+
+/** Deprecated. Use memmove() instead. */
+#define bcopy(b1, b2, len) __bionic_bcopy((b1), (b2), (len))
+static __inline __always_inline void __bionic_bcopy(const void* _Nonnull b1, void* _Nonnull b2, size_t len) {
+  __builtin_memmove(b2, b1, len);
+}
+
+/** Deprecated. Use memset() instead. */
+#define bzero(b, len) __bionic_bzero((b), (len))
+static __inline __always_inline void __bionic_bzero(void* _Nonnull b, size_t len) {
+  __builtin_memset(b, 0, len);
+}
+
+/**
+ * [ffs(3)](https://man7.org/linux/man-pages/man3/ffs.3.html) finds the
+ * first set bit in `__n`.
+ *
+ * Returns 0 if no bit is set, or the index of the lowest set bit (counting
+ * from 1) otherwise.
+ */
+__BIONIC_STRINGS_INLINE int ffs(int __n) {
+  return __builtin_ffs(__n);
+}
+
+/**
+ * [ffsl(3)](https://man7.org/linux/man-pages/man3/ffsl.3.html) finds the
+ * first set bit in `__n`.
+ *
+ * Returns 0 if no bit is set, or the index of the lowest set bit (counting
+ * from 1) otherwise.
+ */
+__BIONIC_STRINGS_INLINE int ffsl(long __n) {
+  return __builtin_ffsl(__n);
+}
+
+/**
+ * [ffsll(3)](https://man7.org/linux/man-pages/man3/ffsll.3.html) finds the
+ * first set bit in `__n`.
+ *
+ * Returns 0 if no bit is set, or the index of the lowest set bit (counting
+ * from 1) otherwise.
+ */
+__BIONIC_STRINGS_INLINE int ffsll(long long __n) {
+  return __builtin_ffsll(__n);
+}
+
+#if defined(__BIONIC_INCLUDE_FORTIFY_HEADERS)
+#include <bits/fortify/strings.h>
+#endif
 
 __END_DECLS
-
-#endif /* !defined(_STRINGS_H_) */

@@ -25,31 +25,48 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #ifndef _MNTENT_H_
 #define _MNTENT_H_
 
-#include <stdio.h>
 #include <sys/cdefs.h>
+
+#include <stdio.h>
 #include <paths.h>  /* for _PATH_MOUNTED */
 
 #define MOUNTED _PATH_MOUNTED
+
 #define MNTTYPE_IGNORE "ignore"
+#define MNTTYPE_NFS "nfs"
+#define MNTTYPE_SWAP "swap"
+
+#define MNTOPT_DEFAULTS "defaults"
+#define MNTOPT_NOAUTO "noauto"
+#define MNTOPT_NOSUID "nosuid"
+#define MNTOPT_RO "ro"
+#define MNTOPT_RW "rw"
+#define MNTOPT_SUID "suid"
 
 struct mntent {
-  char* mnt_fsname;
-  char* mnt_dir;
-  char* mnt_type;
-  char* mnt_opts;
+  char* _Nullable mnt_fsname;
+  char* _Nullable mnt_dir;
+  char* _Nullable mnt_type;
+  char* _Nullable mnt_opts;
   int mnt_freq;
   int mnt_passno;
 };
 
 __BEGIN_DECLS
 
-int endmntent(FILE*);
-struct mntent* getmntent(FILE*);
-struct mntent* getmntent_r(FILE*, struct mntent*, char*, int);
-FILE* setmntent(const char*, const char*);
+int endmntent(FILE* _Nullable __fp);
+struct mntent* _Nullable getmntent(FILE* _Nonnull __fp);
+struct mntent* _Nullable getmntent_r(FILE* _Nonnull __fp, struct mntent* _Nonnull __entry, char* _Nonnull __buf, int __size);
+FILE* _Nullable setmntent(const char* _Nonnull __filename, const char* _Nonnull __type);
+
+#if __BIONIC_AVAILABILITY_GUARD(26)
+char* _Nullable hasmntopt(const struct mntent* _Nonnull __entry, const char* _Nonnull __option) __INTRODUCED_IN(26);
+#endif /* __BIONIC_AVAILABILITY_GUARD(26) */
+
 
 __END_DECLS
 

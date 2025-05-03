@@ -35,8 +35,22 @@
 
 #include <private/bionic_asm.h>
 
-// These are only the callee-saved registers. Code calling setjmp
-// will expect the rest to be clobbered anyway.
+
+// The internal structure of a jmp_buf is totally private.
+// Current layout (changes from release to release):
+//
+// word   name            description
+// 0      rbx             registers
+// 1      rbp
+// 2      r12
+// 3      r13
+// 4      r14
+// 5      r15
+// 6      rsp
+// 7      pc
+// 8      sigflag/cookie  setjmp cookie in top 31 bits, signal mask flag in low bit
+// 9      sigmask         signal mask (includes rt signals as well)
+// 10     checksum        checksum of the core registers, to give better error messages.
 
 #define _JB_RBX 0
 #define _JB_RBP 1
@@ -48,39 +62,27 @@
 #define _JB_PC 7
 #define _JB_SIGFLAG 8
 #define _JB_SIGMASK 9
-#define _JB_SIGMASK_RT 10 // sigprocmask will write here too.
+#define _JB_CHECKSUM 10
 
-#define MANGLE_REGISTERS 1
-.macro m_mangle_registers reg
-#if MANGLE_REGISTERS
-  xorq \reg,%rbx
-  xorq \reg,%rbp
-  xorq \reg,%r12
-  xorq \reg,%r13
-  xorq \reg,%r14
-  xorq \reg,%r15
-  xorq \reg,%rsp
-  xorq \reg,%r11
-#endif
+.macro m_calculate_checksum dst, src
+  movq $0, \dst
+  .irp i,0,1,2,3,4,5,6,7
+    xorq (\i*8)(\src), \dst
+  .endr
 .endm
 
-.macro m_unmangle_registers reg
-  m_mangle_registers \reg
-.endm
-
-
-ENTRY(setjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(setjmp)
   movl $1,%esi
   jmp PIC_PLT(sigsetjmp)
 END(setjmp)
 
-ENTRY(_setjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(_setjmp)
   movl $0,%esi
   jmp PIC_PLT(sigsetjmp)
 END(_setjmp)
 
 // int sigsetjmp(sigjmp_buf env, int save_signal_mask);
-ENTRY(sigsetjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(sigsetjmp)
   pushq %rdi
   movq %rsi,%rdi
   call PIC_PLT(__bionic_setjmp_cookie_get)
@@ -103,29 +105,42 @@ ENTRY(sigsetjmp)
   popq %rdi // Pop 'env'.
 
 2:
-  // Save the callee-save registers.
+  // Fetch the setjmp cookie and clear the signal flag bit.
   popq %rax
   andq $-2,%rax
   movq (%rsp),%r11
-  m_mangle_registers %rax
-  movq %rbx,(_JB_RBX * 8)(%rdi)
-  movq %rbp,(_JB_RBP * 8)(%rdi)
-  movq %r12,(_JB_R12 * 8)(%rdi)
-  movq %r13,(_JB_R13 * 8)(%rdi)
-  movq %r14,(_JB_R14 * 8)(%rdi)
-  movq %r15,(_JB_R15 * 8)(%rdi)
-  movq %rsp,(_JB_RSP * 8)(%rdi)
-  movq %r11,(_JB_PC  * 8)(%rdi)
-  m_unmangle_registers %rax
+
+  // Save the callee-save registers.
+
+.macro m_mangle_register reg, offset
+  movq \reg, (\offset * 8)(%rdi)
+  xorq %rax, (\offset * 8)(%rdi)  // %rax contains the cookie.
+.endm
+
+  m_mangle_register %rbx, _JB_RBX
+  m_mangle_register %rbp, _JB_RBP
+  m_mangle_register %r12, _JB_R12
+  m_mangle_register %r13, _JB_R13
+  m_mangle_register %r14, _JB_R14
+  m_mangle_register %r15, _JB_R15
+  m_mangle_register %rsp, _JB_RSP
+  m_mangle_register %r11, _JB_PC
+
+  m_calculate_checksum %rax, %rdi
+  movq %rax, (_JB_CHECKSUM * 8)(%rdi)
 
   xorl %eax,%eax
   ret
 END(sigsetjmp)
 
 // void siglongjmp(sigjmp_buf env, int value);
-ENTRY(siglongjmp)
+ENTRY_WEAK_FOR_NATIVE_BRIDGE(siglongjmp)
   movq %rdi,%r12
   pushq %rsi // Push 'value'.
+
+  m_calculate_checksum %rax, %rdi
+  xorq (_JB_CHECKSUM * 8)(%rdi), %rax
+  jnz 3f
 
   // Do we need to restore the signal mask?
   movq (_JB_SIGFLAG * 8)(%rdi), %rdi
@@ -147,20 +162,29 @@ ENTRY(siglongjmp)
   popq %rax // Pop 'value'.
 
   // Restore the callee-save registers.
-  movq (_JB_RBX * 8)(%r12),%rbx
-  movq (_JB_RBP * 8)(%r12),%rbp
-  movq (_JB_R13 * 8)(%r12),%r13
-  movq (_JB_R14 * 8)(%r12),%r14
-  movq (_JB_R15 * 8)(%r12),%r15
-  movq (_JB_RSP * 8)(%r12),%rsp
-  movq (_JB_PC  * 8)(%r12),%r11
-  movq (_JB_R12 * 8)(%r12),%r12
-  m_unmangle_registers %rcx
+
+.macro m_unmangle_register reg, offset
+  movq (\offset * 8)(%r12), %rdx  // Clobbers rdx.
+  xorq %rcx, %rdx                 // %rcx contains the cookie.
+  // Now it's safe to overwrite the register (http://b/152210274).
+  movq %rdx, \reg
+.endm
+
+  m_unmangle_register %rbx, _JB_RBX
+  m_unmangle_register %rbp, _JB_RBP
+  m_unmangle_register %r13, _JB_R13
+  m_unmangle_register %r14, _JB_R14
+  m_unmangle_register %r15, _JB_R15
+  m_unmangle_register %rsp, _JB_RSP
+  m_unmangle_register %r11, _JB_PC
+  m_unmangle_register %r12, _JB_R12
 
   // Check the cookie.
   pushq %rax
+  pushq %r11
   movq %rcx, %rdi
   call PIC_PLT(__bionic_setjmp_cookie_check)
+  popq %r11
   popq %rax
 
   // Return 1 if value is 0.
@@ -170,7 +194,10 @@ ENTRY(siglongjmp)
 1:
   movq %r11,0(%rsp)
   ret
+
+3:
+  call PIC_PLT(__bionic_setjmp_checksum_mismatch)
 END(siglongjmp)
 
-ALIAS_SYMBOL(longjmp, siglongjmp)
-ALIAS_SYMBOL(_longjmp, siglongjmp)
+ALIAS_SYMBOL_WEAK_FOR_NATIVE_BRIDGE(longjmp, siglongjmp)
+ALIAS_SYMBOL_WEAK_FOR_NATIVE_BRIDGE(_longjmp, siglongjmp)

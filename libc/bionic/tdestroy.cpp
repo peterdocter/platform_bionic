@@ -14,15 +14,20 @@
  * limitations under the License.
  */
 
-#define _SEARCH_PRIVATE
 #include <search.h>
 #include <stdlib.h>
+
+struct node_t {
+  char* key;
+  struct node* llink;
+  struct node* rlink;
+};
 
 // Destroy a tree and free all allocated resources.
 // This is a GNU extension, not available from BSD.
 void tdestroy(void* root, void (*destroy_func)(void*)) {
   node_t* root_node = reinterpret_cast<node_t*>(root);
-  if (root_node == NULL) {
+  if (root_node == nullptr) {
     return;
   }
   if (root_node->llink) {

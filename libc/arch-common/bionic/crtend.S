@@ -28,26 +28,15 @@
 
 #include "asm_multiarch.h"
 
-	.section .preinit_array, "aw"
-	ASM_ALIGN_TO_PTR_SIZE
-	ASM_PTR_SIZE(0)
+#include <private/bionic_asm.h>
 
-	.section .init_array, "aw"
-	ASM_ALIGN_TO_PTR_SIZE
-	ASM_PTR_SIZE(0)
+__bionic_asm_custom_note_gnu_section()
 
-	.section .fini_array, "aw"
-	ASM_ALIGN_TO_PTR_SIZE
-	ASM_PTR_SIZE(0)
+	.section .note.GNU-stack, "", %progbits
 
-#if defined(__linux__) && defined(__ELF__)
-	.section .note.GNU-stack,"",%progbits
-#endif
-#if defined(__i386__) || defined(__x86_64__)
-	.section	.eh_frame,"a",@progbits
-#if defined(__i386__)
+#if !defined(__arm__)
+	.section .eh_frame, "a", @progbits
 	.balign 4
-#endif
 	.type	__FRAME_END__, @object
 	.size	__FRAME_END__, 4
 __FRAME_END__:

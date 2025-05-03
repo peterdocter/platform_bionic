@@ -25,18 +25,20 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef _ELF_H
-#define _ELF_H
 
-#include <linux/auxvec.h>
+#pragma once
+
+#include <sys/cdefs.h>
+
 #include <linux/elf.h>
 #include <linux/elf-em.h>
+#undef EI_PAD
 
-#include <machine/elf_machdep.h>
+#include <bits/auxvec.h>
+#include <bits/elf_common.h>
 
-#define ELF32_R_INFO(sym, type) ((((Elf32_Word)sym) << 8) | ((type) & 0xff))
-#define ELF64_R_INFO(sym, type) ((((Elf64_Xword)sym) << 32) | ((type) & 0xffffffff))
-
+/* http://www.sco.com/developers/gabi/latest/ch4.intro.html */
+typedef __u64 Elf32_Xword;
 typedef __s64 Elf32_Sxword;
 
 typedef struct {
@@ -52,6 +54,61 @@ typedef struct {
     __u64 a_val;
   } a_un;
 } Elf64_auxv_t;
+
+/* http://www.sco.com/developers/gabi/latest/ch4.sheader.html */
+typedef struct {
+  Elf32_Word ch_type;
+  Elf32_Word ch_size;
+  Elf32_Word ch_addralign;
+} Elf32_Chdr;
+typedef struct {
+  Elf64_Word ch_type;
+  Elf64_Word ch_reserved;
+  Elf64_Xword ch_size;
+  Elf64_Xword ch_addralign;
+} Elf64_Chdr;
+
+typedef struct {
+  Elf32_Word l_name;
+  Elf32_Word l_time_stamp;
+  Elf32_Word l_checksum;
+  Elf32_Word l_version;
+  Elf32_Word l_flags;
+} Elf32_Lib;
+typedef struct {
+  Elf64_Word l_name;
+  Elf64_Word l_time_stamp;
+  Elf64_Word l_checksum;
+  Elf64_Word l_version;
+  Elf64_Word l_flags;
+} Elf64_Lib;
+
+typedef struct {
+  Elf32_Xword m_value;
+  Elf32_Word m_info;
+  Elf32_Word m_poffset;
+  Elf32_Half m_repeat;
+  Elf32_Half m_stride;
+} Elf32_Move;
+typedef struct {
+  Elf64_Xword m_value;
+  Elf64_Xword m_info;
+  Elf64_Xword m_poffset;
+  Elf64_Half m_repeat;
+  Elf64_Half m_stride;
+} Elf64_Move;
+
+typedef __u16 Elf32_Section;
+typedef __u16 Elf64_Section;
+
+typedef struct {
+  Elf32_Half si_boundto;
+  Elf32_Half si_flags;
+} Elf32_Syminfo;
+typedef struct {
+  Elf64_Half si_boundto;
+  Elf64_Half si_flags;
+} Elf64_Syminfo;
 
 typedef Elf32_Half Elf32_Versym;
 typedef Elf64_Half Elf64_Versym;
@@ -118,24 +175,17 @@ typedef struct {
   Elf64_Word vna_next;
 } Elf64_Vernaux;
 
-#define DF_ORIGIN     0x00000001
-#define DF_SYMBOLIC   0x00000002
-#define DF_TEXTREL    0x00000004
-#define DF_BIND_NOW   0x00000008
-#define DF_STATIC_TLS 0x00000010
+/* Relocation table entry for relative (in section of type SHT_RELR). */
+typedef Elf32_Word Elf32_Relr;
+typedef Elf64_Xword Elf64_Relr;
+
+/* http://www.sco.com/developers/gabi/latest/ch5.dynamic.html */
 
 #define DF_1_NOW        0x00000001 /* Perform complete relocation processing. */
-#define DF_1_GLOBAL     0x00000002 /* implies RTLD_GLOBAL */
 #define DF_1_GROUP      0x00000004
-#define DF_1_NODELETE   0x00000008 /* implies RTLD_NODELETE */
-#define DF_1_LOADFLTR   0x00000010
 #define DF_1_INITFIRST  0x00000020
-#define DF_1_NOOPEN     0x00000040 /* Object can not be used with dlopen(3) */
-#define DF_1_ORIGIN     0x00000080
 #define DF_1_DIRECT     0x00000100
 #define DF_1_TRANS      0x00000200
-#define DF_1_INTERPOSE  0x00000400
-#define DF_1_NODEFLIB   0x00000800
 #define DF_1_NODUMP     0x00001000 /* Object cannot be dumped with dldump(3) */
 #define DF_1_CONFALT    0x00002000
 #define DF_1_ENDFILTEE  0x00004000
@@ -151,63 +201,99 @@ typedef struct {
 #define DF_1_GLOBAUDIT  0x01000000
 #define DF_1_SINGLETON  0x02000000
 #define DF_1_STUB       0x04000000
-#define DF_1_PIE        0x08000000
 
-#define DT_BIND_NOW 24
-#define DT_INIT_ARRAY 25
-#define DT_FINI_ARRAY 26
-#define DT_INIT_ARRAYSZ 27
-#define DT_FINI_ARRAYSZ 28
-#define DT_RUNPATH 29
-#define DT_FLAGS 30
-/* glibc and BSD disagree for DT_ENCODING; glibc looks wrong. */
-#define DT_PREINIT_ARRAY 32
-#define DT_PREINIT_ARRAYSZ 33
+/* http://www.sco.com/developers/gabi/latest/ch4.reloc.html */
+#define ELF32_R_INFO(sym, type) ((((Elf32_Word)sym) << 8) | ((type) & 0xff))
+#define ELF64_R_INFO(sym, type) ((((Elf64_Xword)sym) << 32) | ((type) & 0xffffffff))
 
-/* Android compressed rel/rela sections */
-#define DT_ANDROID_REL (DT_LOOS + 2)
-#define DT_ANDROID_RELSZ (DT_LOOS + 3)
+/* http://www.sco.com/developers/gabi/latest/ch4.symtab.html */
+#define ELF_ST_INFO(b,t) (((b) << 4) + ((t) & 0xf))
+#define ELF32_ST_INFO(b,t) ELF_ST_INFO(b,t)
+#define ELF64_ST_INFO(b,t) ELF_ST_INFO(b,t)
 
-#define DT_ANDROID_RELA (DT_LOOS + 4)
-#define DT_ANDROID_RELASZ (DT_LOOS + 5)
+/* http://www.sco.com/developers/gabi/latest/ch4.sheader.html */
+#define GRP_MASKOS   0x0ff00000
+#define GRP_MASKPROC 0xf0000000
 
-/* gnu hash entry */
-#define DT_GNU_HASH 0x6ffffef5
+/* http://www.sco.com/developers/gabi/latest/ch4.sheader.html */
+/*
+ * Standard replacement for SHT_ANDROID_RELR.
+ */
+#define SHT_RELR 19
+#undef SHT_NUM
+#define SHT_NUM 20
 
-#define ELFOSABI_SYSV 0 /* Synonym for ELFOSABI_NONE used by valgrind. */
+/*
+ * Experimental support for SHT_RELR sections. For details, see proposal
+ * at https://groups.google.com/forum/#!topic/generic-abi/bX460iggiKg.
+ *
+ * This was eventually replaced by SHT_RELR and DT_RELR (which are identical
+ * other than their different constants), but those constants are only
+ * supported by the OS in API levels >= 30.
+ */
+#define SHT_ANDROID_RELR 0x6fffff00
+#define DT_ANDROID_RELR 0x6fffe000
+#define DT_ANDROID_RELRSZ 0x6fffe001
+#define DT_ANDROID_RELRENT 0x6fffe003
+#define DT_ANDROID_RELRCOUNT 0x6fffe005
 
-#define PT_GNU_RELRO 0x6474e552
+/*
+ * Android compressed REL/RELA sections. These were generated by the relocation
+ * packer in old versions of Android, and can be generated directly by lld
+ * with https://reviews.llvm.org/D39152.
+ *
+ * This was replaced by SHT_ANDROID_RELR in API level 28 (but is supported
+ * in all API levels >= 23).
+ */
+#define SHT_ANDROID_REL 0x60000001
+#define SHT_ANDROID_RELA 0x60000002
+#define DT_ANDROID_REL 0x6000000f // DT_LOOS + 2
+#define DT_ANDROID_RELSZ 0x60000010 // DT_LOOS + 3
+#define DT_ANDROID_RELA 0x60000011 // DT_LOOS + 4
+#define DT_ANDROID_RELASZ 0x60000012 // DT_LOOS + 5
 
-#define STB_LOOS      10
-#define STB_HIOS      12
-#define STB_LOPROC    13
-#define STB_HIPROC    15
+/* arm64 psabi. */
 
-#define SHT_LOOS    0x60000000
-#define SHT_HIOS    0x6fffffff
+/* TODO: upstreamed to FreeBSD as https://github.com/freebsd/freebsd-src/pull/1141/. */
+#define DT_AARCH64_MEMTAG_MODE 0x70000009
+#define DT_AARCH64_MEMTAG_HEAP 0x7000000b
+#define DT_AARCH64_MEMTAG_STACK 0x7000000c
+#define DT_AARCH64_MEMTAG_GLOBALS 0x7000000d
+#define DT_AARCH64_MEMTAG_GLOBALSSZ 0x7000000f
 
-#define STT_GNU_IFUNC 10
-#define STT_LOOS      10
-#define STT_HIOS      12
-#define STT_LOPROC    13
-#define STT_HIPROC    15
+/* Linux traditionally doesn't have the trailing 64 that BSD has on these. */
+#define R_AARCH64_TLS_DTPREL R_AARCH64_TLS_DTPREL64
+#define R_AARCH64_TLS_DTPMOD R_AARCH64_TLS_DTPMOD64
+#define R_AARCH64_TLS_TPREL R_AARCH64_TLS_TPREL64
 
-#define STV_DEFAULT   0
-#define STV_INTERNAL  1
-#define STV_HIDDEN    2
-#define STV_PROTECTED 3
+/* TODO: upstream these to FreeBSD? */
+#define R_ARM_TLS_DESC 13
+#define R_ARM_IRELATIVE 160
 
-/* The kernel uses NT_PRFPREG but glibc also offers NT_FPREGSET */
-#define NT_FPREGSET NT_PRFPREG
+/* riscv64 psabi. */
 
-#define ELF_NOTE_GNU "GNU"
+/*
+ * https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#relocations
+ * Missing from FreeBSD and the Linux uapi headers.
+ * TODO: upstreamed to FreeBSD as https://github.com/freebsd/freebsd-src/pull/1141.
+ */
+#define R_RISCV_TLSDESC 12
+#define R_RISCV_TLSDESC_HI20 62
+#define R_RISCV_TLSDESC_LOAD_LO12 63
+#define R_RISCV_TLSDESC_ADD_LO12 64
+#define R_RISCV_TLSDESC_CALL 65
 
-#define NT_GNU_BUILD_ID 3
+/* https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#program-header-table */
+#define PT_RISCV_ATTRIBUTES 0x70000003
 
-#define VER_FLG_BASE 0x1
-#define VER_FLG_WEAK 0x2
+/* https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#section-types */
+#define SHT_RISCV_ATTRIBUTES 0x70000003
 
-#define VER_NDX_LOCAL  0
-#define VER_NDX_GLOBAL 1
+/* FreeBSD spells this slightly differently to Linux. Linux is correct according to
+ * https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#file-header
+ * so I've sent https://github.com/freebsd/freebsd-src/pull/1148 upstream.
+ */
+#define EF_RISCV_FLOAT_ABI EF_RISCV_FLOAT_ABI_MASK
 
-#endif /* _ELF_H */
+/* FreeBSD spells this slightly differently to Linux. */
+#define R_X86_64_JUMP_SLOT R_X86_64_JMP_SLOT

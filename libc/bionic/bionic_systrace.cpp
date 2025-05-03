@@ -14,76 +14,50 @@
  * limitations under the License.
  */
 
-#include <cutils/trace.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "bionic/pthread_internal.h"
 #include "private/bionic_lock.h"
 #include "private/bionic_systrace.h"
-#include "private/libc_logging.h"
+#include "private/bionic_tls.h"
+#include "private/CachedProperty.h"
 
-#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
-#include <sys/_system_properties.h>
+#include <async_safe/log.h>
+#include <cutils/trace.h> // For ATRACE_TAG_BIONIC.
 
 #define WRITE_OFFSET   32
 
-constexpr char SYSTRACE_PROPERTY_NAME[] = "debug.atrace.tags.enableflags";
-
 static Lock g_lock;
-static const prop_info* g_pinfo;
-static uint32_t g_serial = -1;
+static CachedProperty g_debug_atrace_tags_enableflags("debug.atrace.tags.enableflags");
 static uint64_t g_tags;
 static int g_trace_marker_fd = -1;
 
 static bool should_trace() {
-  bool result = false;
   g_lock.lock();
-  // If g_pinfo is null, this means that systrace hasn't been run and it's safe to
-  // assume that no trace writing will need to take place.  However, to avoid running
-  // this costly find check each time, we set it to a non-tracing value so that next
-  // time, it will just check the serial to see if the value has been changed.
-  // this function also deals with the bootup case, during which the call to property
-  // set will fail if the property server hasn't yet started.
-  if (g_pinfo == NULL) {
-    g_pinfo = __system_property_find(SYSTRACE_PROPERTY_NAME);
-    if (g_pinfo == NULL) {
-      __system_property_set(SYSTRACE_PROPERTY_NAME, "0");
-      g_pinfo = __system_property_find(SYSTRACE_PROPERTY_NAME);
-    }
-  }
-  if (g_pinfo != NULL) {
-    // Find out which tags have been enabled on the command line and set
-    // the value of tags accordingly.  If the value of the property changes,
-    // the serial will also change, so the costly system_property_read function
-    // can be avoided by calling the much cheaper system_property_serial
-    // first.  The values within pinfo may change, but its location is guaranteed
-    // not to move.
-    uint32_t cur_serial = __system_property_serial(g_pinfo);
-    if (cur_serial != g_serial) {
-      g_serial = cur_serial;
-      char value[PROP_VALUE_MAX];
-      __system_property_read(g_pinfo, 0, value);
-      g_tags = strtoull(value, NULL, 0);
-    }
-    result = ((g_tags & ATRACE_TAG_BIONIC) != 0);
+  if (g_debug_atrace_tags_enableflags.DidChange()) {
+    g_tags = strtoull(g_debug_atrace_tags_enableflags.Get(), nullptr, 0);
   }
   g_lock.unlock();
-  return result;
+  return ((g_tags & ATRACE_TAG_BIONIC) != 0);
 }
 
 static int get_trace_marker_fd() {
   g_lock.lock();
   if (g_trace_marker_fd == -1) {
-    g_trace_marker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_CLOEXEC | O_WRONLY);
+    g_trace_marker_fd = open("/sys/kernel/tracing/trace_marker", O_CLOEXEC | O_WRONLY);
+    if (g_trace_marker_fd == -1) {
+      g_trace_marker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_CLOEXEC | O_WRONLY);
+    }
   }
   g_lock.unlock();
   return g_trace_marker_fd;
 }
 
-ScopedTrace::ScopedTrace(const char* message) {
+static void trace_begin_internal(const char* message) {
   if (!should_trace()) {
     return;
   }
@@ -97,14 +71,29 @@ ScopedTrace::ScopedTrace(const char* message) {
   // kernel trace_marker.
   int length = strlen(message);
   char buf[length + WRITE_OFFSET];
-  size_t len = snprintf(buf, length + WRITE_OFFSET, "B|%d|%s", getpid(), message);
+  size_t len = async_safe_format_buffer(buf, length + WRITE_OFFSET, "B|%d|%s", getpid(), message);
 
   // Tracing may stop just after checking property and before writing the message.
   // So the write is acceptable to fail. See b/20666100.
   TEMP_FAILURE_RETRY(write(trace_marker_fd, buf, len));
 }
 
-ScopedTrace::~ScopedTrace() {
+void bionic_trace_begin(const char* message) {
+  // Some functions called by trace_begin_internal() can call
+  // bionic_trace_begin(). Prevent infinite recursion and non-recursive mutex
+  // deadlock by using a flag in the thread local storage.
+  bionic_tls& tls = __get_bionic_tls();
+  if (tls.bionic_systrace_disabled) {
+    return;
+  }
+  tls.bionic_systrace_disabled = true;
+
+  trace_begin_internal(message);
+
+  tls.bionic_systrace_disabled = false;
+}
+
+static void trace_end_internal() {
   if (!should_trace()) {
     return;
   }
@@ -114,5 +103,49 @@ ScopedTrace::~ScopedTrace() {
     return;
   }
 
-  TEMP_FAILURE_RETRY(write(trace_marker_fd, "E", 1));
+  // This code is intentionally "sub-optimal"; do not optimize this by inlining
+  // the E| string into the write.
+  //
+  // This is because if the const char* string passed to write(trace_marker) is not
+  // in resident memory (e.g. the page of the .rodata section that contains it has
+  // been paged out, or the anonymous page that contained a heap-based string is
+  // swapped in zram), the ftrace code will NOT page it in and instead report
+  // <faulted>.
+  //
+  // We "fix" this by putting the string on the stack, which is more unlikely
+  // to be paged out and pass the pointer to that instead.
+  //
+  // See b/197620214 for more context on this.
+  volatile char buf[2]{'E', '|'};
+  TEMP_FAILURE_RETRY(write(trace_marker_fd, const_cast<const char*>(buf), 2));
+}
+
+void bionic_trace_end() {
+  // Some functions called by trace_end_internal() can call
+  // bionic_trace_begin(). Prevent infinite recursion and non-recursive mutex
+  // deadlock by using a flag in the thread local storage.
+  bionic_tls& tls = __get_bionic_tls();
+  if (tls.bionic_systrace_disabled) {
+    return;
+  }
+  tls.bionic_systrace_disabled = true;
+
+  trace_end_internal();
+
+  tls.bionic_systrace_disabled = false;
+}
+
+ScopedTrace::ScopedTrace(const char* message) : called_end_(false) {
+  bionic_trace_begin(message);
+}
+
+ScopedTrace::~ScopedTrace() {
+  End();
+}
+
+void ScopedTrace::End() {
+  if (!called_end_) {
+    bionic_trace_end();
+    called_end_ = true;
+  }
 }
